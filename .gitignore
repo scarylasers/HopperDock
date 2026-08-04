@@ -1,0 +1,29 @@
+# PyInstaller output
+build/
+dist/
+*.manifest
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime logs (the real log lives in %USERPROFILE%\WindowDock\logs)
+logs/
+*.log
+
+# Local editor / tooling state
+.claude/
+.idea/
+.vscode/
+
+# User config must never be committed — it holds personal paths.
+# The app writes these to %USERPROFILE%\WindowDock\, but guard against a
+# stray copy landing here.
+settings.json
+shortcuts.json
+layouts.json
+*.corrupt-*
+*.backup-*

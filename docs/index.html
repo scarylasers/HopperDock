@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HopperDock — a little dock that remembers where your windows go</title>
+<meta name="description" content="A small floating toolbar for Windows that moves, tiles and remembers where your windows live — plus a launcher for the apps and scripts you actually use.">
+<link rel="icon" href="favicon.ico">
+<meta property="og:title" content="HopperDock">
+<meta property="og:description" content="A small floating toolbar for Windows that moves, tiles and remembers where your windows live.">
+<meta property="og:image" content="bunny.png">
+<meta property="og:type" content="website">
+<style>
+/* ---------------------------------------------------------------------
+   Palette lifted verbatim from the app's own THEMES dict, so this page
+   wears the same two skins the dock does: Neon Bunny / Pastel Bunny.
+   --------------------------------------------------------------------- */
+:root {
+  --bg:        #fafafa;
+  --surface:   #ececec;
+  --raised:    #d8d8d8;
+  --pink:      #d6266b;
+  --pink-soft: #ff85b5;
+  --teal:      #0a8b78;
+  --purple:    #8230b5;
+  --yellow:    #a88300;
+  --orange:    #d94e1f;
+  --ink:       #1a1a1a;
+  /* neutrals biased toward the accent so they read chosen, not default */
+  --ink-dim:   #6b6066;
+  --hairline:  rgba(214, 38, 107, .18);
+  --glow:      rgba(214, 38, 107, .10);
+  --dock-bg:   #1e1e1e;
+  --dock-mid:  #2d2d2d;
+  --dock-ink:  #ffffff;
+  --shadow:    0 1px 2px rgba(26,16,21,.06), 0 8px 28px rgba(26,16,21,.08);
+
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, SFMono-Regular, monospace;
+
+  --measure: 68ch;
+  --gutter: clamp(1.25rem, 4vw, 2.5rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #1e1e1e;
+    --surface:   #2d2d2d;
+    --raised:    #3d3d3d;
+    --pink:      #ff2e97;
+    --pink-soft: #ff6eb8;
+    --teal:      #00f5d4;
+    --purple:    #b537f2;
+    --yellow:    #f5d300;
+    --orange:    #ff6b35;
+    --ink:       #ffffff;
+    --ink-dim:   #9b8f95;
+    --hairline:  rgba(255, 46, 151, .22);
+    --glow:      rgba(255, 46, 151, .13);
+    --dock-bg:   #161616;
+    --dock-mid:  #2d2d2d;
+    --dock-ink:  #ffffff;
+    --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 34px rgba(0,0,0,.45);
+  }
+}
+/* Viewer's explicit toggle must beat the OS preference in both directions */
+:root[data-theme="light"] {
+  --bg:#fafafa; --surface:#ececec; --raised:#d8d8d8;
+  --pink:#d6266b; --pink-soft:#ff85b5; --teal:#0a8b78; --purple:#8230b5;
+  --yellow:#a88300; --orange:#d94e1f; --ink:#1a1a1a; --ink-dim:#6b6066;
+  --hairline:rgba(214,38,107,.18); --glow:rgba(214,38,107,.10);
+  --dock-bg:#1e1e1e; --dock-mid:#2d2d2d; --dock-ink:#ffffff;
+  --shadow:0 1px 2px rgba(26,16,21,.06), 0 8px 28px rgba(26,16,21,.08);
+}
+:root[data-theme="dark"] {
+  --bg:#1e1e1e; --surface:#2d2d2d; --raised:#3d3d3d;
+  --pink:#ff2e97; --pink-soft:#ff6eb8; --teal:#00f5d4; --purple:#b537f2;
+  --yellow:#f5d300; --orange:#ff6b35; --ink:#ffffff; --ink-dim:#9b8f95;
+  --hairline:rgba(255,46,151,.22); --glow:rgba(255,46,151,.13);
+  --dock-bg:#161616; --dock-mid:#2d2d2d; --dock-ink:#ffffff;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 34px rgba(0,0,0,.45);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip; /* belt-and-braces: the body must never scroll sideways */
+}
+
+/* The dock pins itself to a screen edge — so does this page. */
+.rail {
+  position: fixed; inset: 0 auto 0 0; width: 5px; z-index: 40;
+  background: linear-gradient(180deg, var(--pink), var(--purple) 45%, var(--teal));
+}
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 var(--gutter) 5rem calc(var(--gutter) + 5px); }
+
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.6rem, 7vw, 4.4rem); font-weight: 800; letter-spacing: -.035em; line-height: 1.02; }
+h2 { font-size: clamp(1.5rem, 3.4vw, 2.05rem); font-weight: 800; letter-spacing: -.022em; }
+h3 { font-size: 1.12rem; font-weight: 700; letter-spacing: -.01em; }
+p  { margin: 0; max-width: var(--measure); }
+a  { color: var(--pink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--purple); }
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; border-radius: 3px; }
+
+.eyebrow {
+  font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+  letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim);
+}
+
+/* ---- hero ---- */
+.hero {
+  display: grid; gap: 1.4rem; justify-items: center; text-align: center;
+  padding: clamp(2.5rem, 8vw, 5rem) 0 clamp(2rem, 5vw, 3rem);
+  position: relative;
+}
+/* Anchored to the hero's centre. Without left/translate this sits at the
+   content-box origin and, being wider than the column, pushes the whole
+   page into a horizontal scroll on narrow screens. */
+.hero::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  width: min(760px, 100%); aspect-ratio: 1; top: -22%;
+  left: 50%; transform: translateX(-50%);
+  background: radial-gradient(circle, var(--glow), transparent 62%);
+}
+.hero img { width: clamp(140px, 26vw, 210px); height: auto; }
+.tagline { font-size: clamp(1.05rem, 2.3vw, 1.28rem); color: var(--ink-dim); max-width: 44ch; }
+.tagline b { color: var(--ink); font-weight: 600; }
+
+.cta-row { display: flex; flex-wrap: wrap; gap: .7rem; justify-content: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-family: var(--font-body); font-size: .95rem; font-weight: 600;
+  padding: .68rem 1.25rem; border-radius: 7px; text-decoration: none;
+  border: 1.5px solid transparent; transition: transform .12s ease, background .12s ease;
+}
+.btn-primary { background: var(--pink); color: #fff; }
+.btn-primary:hover { background: var(--purple); color: #fff; transform: translateY(-1px); }
+.btn-ghost { border-color: var(--hairline); color: var(--ink); background: transparent; }
+.btn-ghost:hover { border-color: var(--teal); color: var(--teal); transform: translateY(-1px); }
+
+.badges { display: flex; flex-wrap: wrap; gap: .45rem; justify-content: center; }
+.badge {
+  font-family: var(--font-mono); font-size: .68rem; letter-spacing: .06em;
+  padding: .26rem .6rem; border-radius: 999px;
+  border: 1px solid var(--hairline); color: var(--ink-dim);
+}
+
+/* ---- sections ---- */
+section { padding-top: clamp(3rem, 7vw, 4.75rem); }
+.sec-head { display: flex; align-items: center; gap: .7rem; margin-bottom: .5rem; }
+.chip {
+  width: 12px; height: 12px; border-radius: 3px; flex: none;
+  background: var(--c, var(--pink));
+}
+.lede { color: var(--ink-dim); margin-top: .55rem; }
+
+/* ---- what it does ---- */
+.grid { display: grid; gap: .85rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-top: 1.6rem; }
+.card {
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: 10px; padding: 1.05rem 1.15rem;
+}
+.card h3 { margin-bottom: .3rem; }
+.card p { font-size: .93rem; color: var(--ink-dim); }
+
+/* ---- the annotated dock ---- */
+.tour { display: grid; gap: clamp(1.5rem, 4vw, 2.6rem); grid-template-columns: auto 1fr; margin-top: 1.8rem; align-items: start; }
+@media (max-width: 720px) { .tour { grid-template-columns: 1fr; justify-items: center; } }
+
+.dock {
+  background: var(--dock-bg); border-radius: 9px; padding: 7px 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  box-shadow: var(--shadow); border-right: 2px solid var(--pink);
+  position: sticky; top: 1.5rem; width: 74px;
+}
+@media (max-width: 720px) { .dock { position: static; } }
+.dock img { width: 40px; height: 40px; }
+.dock hr { width: 100%; border: 0; border-top: 1px solid var(--pink); margin: 3px 0; opacity: .8; }
+.k {
+  font-family: var(--font-body); font-size: 11px; font-weight: 700; color: #fff;
+  width: 54px; text-align: center; padding: 5px 0; border-radius: 4px;
+  border: 0; cursor: pointer; transition: filter .12s ease, transform .12s ease;
+  font-variant-numeric: tabular-nums;
+}
+.k:hover, .k.on { filter: brightness(1.35); transform: scale(1.06); }
+.k-teal   { background: #00c4aa; }
+.k-slot   { background: #cc2579; }
+.k-empty  { background: #3d3d3d; color: #b9b9b9; }
+.k-purple { background: #b537f2; }
+.k-pink   { background: #ff2e97; color: #1e1e1e; }
+.k-yellow { background: #f5d300; color: #1e1e1e; }
+.k-orange { background: #ff6b35; color: #1e1e1e; }
+.k-app    { background: #2d2d2d; color: #dcdcdc; font-size: 15px; }
+
+.legend { display: grid; gap: .1rem; align-content: start; }
+.row {
+  display: grid; grid-template-columns: auto 1fr; gap: .9rem; align-items: baseline;
+  padding: .62rem .7rem; border-radius: 8px; border: 1px solid transparent;
+  cursor: default; transition: background .12s ease, border-color .12s ease;
+}
+.row:hover, .row.on { background: var(--surface); border-color: var(--hairline); }
+.row dt { font-family: var(--font-mono); font-size: .74rem; font-weight: 700; color: var(--ink); white-space: nowrap; padding-top: .18rem; }
+.row dd { margin: 0; font-size: .93rem; color: var(--ink-dim); }
+.row dd b { color: var(--ink); font-weight: 600; }
+.legend dl { margin: 0; display: contents; }
+
+/* ---- install ---- */
+.paths { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 1.6rem; }
+.path { background: var(--surface); border: 1px solid var(--hairline); border-radius: 11px; padding: 1.3rem; }
+.path.feature { border-color: var(--pink); }
+.path h3 { display: flex; align-items: center; gap: .55rem; margin-bottom: .2rem; }
+.who { font-size: .84rem; color: var(--ink-dim); margin-bottom: .9rem; }
+ol.steps { margin: 0; padding-left: 1.15rem; display: grid; gap: .45rem; font-size: .93rem; }
+ol.steps li::marker { color: var(--pink); font-weight: 700; }
+
+pre {
+  background: var(--dock-bg); color: #f2f2f2; border-radius: 8px;
+  padding: .85rem 1rem; overflow-x: auto; margin: .8rem 0 0;
+  font-family: var(--font-mono); font-size: .76rem; line-height: 1.65;
+  border: 1px solid var(--hairline);
+}
+pre .c { color: #7fffd4; }
+code:not(pre code) {
+  font-family: var(--font-mono); font-size: .86em; padding: .12em .38em;
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: 4px;
+}
+
+/* ---- tables ---- */
+.scroll { overflow-x: auto; margin-top: 1.1rem; border: 1px solid var(--hairline); border-radius: 9px; }
+table { border-collapse: collapse; width: 100%; font-size: .91rem; }
+th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: .68rem; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-dim); font-weight: 600; background: var(--surface); }
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+/* ---- callout ---- */
+.note {
+  display: grid; grid-template-columns: auto 1fr; gap: .8rem;
+  background: var(--surface); border-left: 3px solid var(--teal);
+  border-radius: 0 8px 8px 0; padding: .9rem 1.1rem; margin-top: 1.2rem;
+  font-size: .92rem; max-width: var(--measure);
+}
+.note .ico { font-size: 1.05rem; line-height: 1.4; }
+.note p { color: var(--ink-dim); }
+.note b { color: var(--ink); }
+
+/* ---- faq ---- */
+details {
+  border: 1px solid var(--hairline); border-radius: 9px;
+  padding: .8rem 1.05rem; margin-top: .55rem; background: var(--surface);
+}
+details[open] { border-color: var(--pink); }
+summary { cursor: pointer; font-weight: 600; font-size: .95rem; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "▸"; color: var(--pink); display: inline-block; width: 1.1em; transition: transform .15s ease; }
+details[open] summary::before { transform: rotate(90deg); }
+details p { margin-top: .6rem; font-size: .92rem; color: var(--ink-dim); }
+
+/* ---- footer ---- */
+footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 1px solid var(--hairline); text-align: center; display: grid; gap: .9rem; justify-items: center; }
+.socials { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+.socials a {
+  font-size: .88rem; font-weight: 600; text-decoration: none; color: var(--ink);
+  padding: .45rem .95rem; border-radius: 7px; border: 1px solid var(--hairline);
+  transition: color .12s ease, border-color .12s ease, transform .12s ease;
+}
+.socials a:hover { color: var(--pink); border-color: var(--pink); transform: translateY(-1px); }
+.fine { font-size: .82rem; color: var(--ink-dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="rail"></div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <img src="bunny.png" alt="The HopperDock bunny: a pink and white rabbit with round glasses, a halo and a mint bow tie">
+    <h1>HopperDock</h1>
+    <p class="tagline">A little floating toolbar for Windows that moves, tiles and
+      <b>remembers exactly where your windows go</b> — plus a launcher for the apps
+      and scripts you actually use.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/scarylasers/HopperDock/releases/latest">⬇ Download for Windows</a>
+      <a class="btn btn-ghost" href="https://github.com/scarylasers/HopperDock">View the source</a>
+    </div>
+    <div class="badges">
+      <span class="badge">WINDOWS 10 / 11</span>
+      <span class="badge">FREE &amp; MIT LICENSED</span>
+      <span class="badge">NO INSTALLER NEEDED</span>
+    </div>
+  </header>
+
+  <section id="what">
+    <div class="sec-head"><span class="chip" style="--c: var(--pink)"></span><span class="eyebrow">What it's for</span></div>
+    <h2>You already rearrange your windows every day</h2>
+    <p class="lede">HopperDock is for anyone with more than one monitor and a
+      routine — streaming, editing, coding, gaming. It puts the fiddly parts of
+      window management on one small strip you can reach without thinking.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Send everything to one screen</h3>
+        <p>One click gathers every open window onto the monitor you point at. Good for when you unplug a screen and Windows scatters things.</p>
+      </div>
+      <div class="card">
+        <h3>Tile into a grid</h3>
+        <p>Two columns, three columns, 2×2 or 3×2 — on whichever monitor you choose.</p>
+      </div>
+      <div class="card">
+        <h3>Save whole layouts</h3>
+        <p>Snapshot every window's position, size, maximized <em>and</em> minimized state. Restore the whole arrangement later in one click.</p>
+      </div>
+      <div class="card">
+        <h3>Launch your stuff</h3>
+        <p>Group shortcuts into colour-coded categories that slide out of the dock. Scripts, apps, folders, even Windows settings pages.</p>
+      </div>
+      <div class="card">
+        <h3>Pin apps as icons</h3>
+        <p>Click to show or hide an app; if it isn't running, it launches. Like a taskbar you built yourself.</p>
+      </div>
+      <div class="card">
+        <h3>Dock it to the edge</h3>
+        <p>Pin it and Windows reserves the space, so maximized windows stop <em>beside</em> the dock instead of hiding behind it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="tour">
+    <div class="sec-head"><span class="chip" style="--c: var(--teal)"></span><span class="eyebrow">The tour</span></div>
+    <h2>Every button, top to bottom</h2>
+    <p class="lede">This is the dock as it appears on your screen. Hover any button
+      — or any row — to match them up.</p>
+
+    <div class="tour">
+      <div class="dock" aria-hidden="true">
+        <img src="bunny-small.png" alt="">
+        <hr>
+        <button class="k k-teal"   data-k="mon">M1</button>
+        <button class="k k-teal"   data-k="mon">M2</button>
+        <hr>
+        <button class="k k-slot"   data-k="lay">1</button>
+        <button class="k k-empty"  data-k="lay">2</button>
+        <button class="k k-empty"  data-k="lay">3</button>
+        <button class="k k-empty"  data-k="lay">4</button>
+        <hr>
+        <button class="k k-purple" data-k="tile">T</button>
+        <hr>
+        <button class="k k-pink"   data-k="cat">VR</button>
+        <button class="k k-yellow" data-k="cat">MIX</button>
+        <button class="k k-orange" data-k="cat">APPS</button>
+        <hr>
+        <button class="k k-app"    data-k="app">◆</button>
+        <button class="k k-app"    data-k="app">●</button>
+      </div>
+
+      <div class="legend">
+        <dl>
+          <div class="row" data-k="bunny">
+            <dt>🐰 Bunny</dt>
+            <dd><b>Drag</b> to move the dock anywhere. <b>Right-click</b> opens the settings menu — that's where everything lives.</dd>
+          </div>
+          <div class="row" data-k="mon">
+            <dt>M1 M2 …</dt>
+            <dd>Move <b>every open window</b> to that monitor. One button per screen you have connected.</dd>
+          </div>
+          <div class="row" data-k="lay">
+            <dt>1 2 3 4</dt>
+            <dd>Your four saved layouts. <b>Click</b> to restore one, <b>right-click</b> to save, rename or give it an icon. Filled-in means something's saved there.</dd>
+          </div>
+          <div class="row" data-k="tile">
+            <dt>T</dt>
+            <dd>Tile your windows into columns or a grid, on any monitor.</dd>
+          </div>
+          <div class="row" data-k="cat">
+            <dt>Categories</dt>
+            <dd>Your shortcut groups. <b>Click</b> one and a panel slides out with everything inside it. <b>Right-click</b> to rename, recolour, or give it a picture instead of text.</dd>
+          </div>
+          <div class="row" data-k="app">
+            <dt>Pinned apps</dt>
+            <dd>Individual apps as icons. <b>Click</b> to show or hide the app — it launches if it isn't already open.</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="sec-head"><span class="chip" style="--c: var(--purple)"></span><span class="eyebrow">Getting it</span></div>
+    <h2>Two ways in</h2>
+    <p class="lede">Pick the first one if you just want to use it. Pick the second
+      if you want to poke at the code.</p>
+
+    <div class="paths">
+      <div class="path feature">
+        <h3>⬇ Just give me the app</h3>
+        <p class="who">No Python, no setup, nothing to install.</p>
+        <ol class="steps">
+          <li>Download <code>HopperDock.exe</code> from the releases page.</li>
+          <li>Put it anywhere you like — Desktop is fine.</li>
+          <li>Double-click it. The bunny appears.</li>
+          <li>Right-click the bunny → <b>Start on Login</b> so it's always there.</li>
+        </ol>
+        <div class="note" style="margin-top:1.1rem">
+          <span class="ico">🛡</span>
+          <p>Windows may show a <b>“Windows protected your PC”</b> warning the first
+             time — that appears for any app without a paid code-signing certificate.
+             Click <b>More info → Run anyway</b>.</p>
+        </div>
+      </div>
+
+      <div class="path">
+        <h3>⚙ I want the code</h3>
+        <p class="who">Needs Python 3.10 or newer.</p>
+        <ol class="steps">
+          <li>Clone the repo.</li>
+          <li>Install the three dependencies.</li>
+          <li>Run <code>run_dock.bat</code>.</li>
+        </ol>
+<pre><span class="c">git</span> clone https://github.com/scarylasers/HopperDock
+<span class="c">cd</span> HopperDock
+<span class="c">pip</span> install -r requirements.txt
+run_dock.bat</pre>
+        <div class="note" style="margin-top:1.1rem">
+          <span class="ico">🔎</span>
+          <p>Something wrong? Run <code>run_dock_visible.bat</code> instead — same
+             program, but it keeps a console open so you can read the error.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="first">
+    <div class="sec-head"><span class="chip" style="--c: var(--yellow)"></span><span class="eyebrow">First five minutes</span></div>
+    <h2>Making it yours</h2>
+
+    <h3 style="margin-top:1.6rem">Save your first layout</h3>
+    <p class="lede">Arrange your windows how you like them. <b>Right-click</b> layout
+      slot <code>1</code> → <b>Save Layout Here</b>. That's it — clicking <code>1</code>
+      later puts everything back, including anything that was minimized.
+      Right-click again to <b>Rename</b> it to something like “Streaming”, or give it
+      an icon.</p>
+    <div class="note">
+      <span class="ico">💡</span>
+      <p>Layouts find your windows <b>by their title</b>. So an app has to be open
+        for its window to be moved back — and apps that rename their own title bar
+        (a music player showing the current track) can drift. Re-save the slot if
+        that happens.</p>
+    </div>
+
+    <h3 style="margin-top:2rem">Add a shortcut</h3>
+    <p class="lede">The fastest way: <b>drag any file straight onto the dock.</b>
+      Or do it by hand:</p>
+    <ol class="steps" style="margin-top:.8rem">
+      <li>Click a category button to open its panel.</li>
+      <li>Click the <b>✏ pencil</b> in the panel header to start editing.</li>
+      <li>Click <b>+ Add Shortcut</b> and pick your file.</li>
+      <li>Click the <b>✓</b> when you're done.</li>
+    </ol>
+    <p class="lede" style="margin-top:.9rem">Shortcuts can point at almost anything:</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>You point it at</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td><code>.exe</code> / <code>.lnk</code></td><td>Launches the program.</td></tr>
+          <tr><td><code>.bat</code> / <code>.cmd</code></td><td>Runs the script.</td></tr>
+          <tr><td><code>.py</code></td><td>Runs it with <code>pythonw</code>, no console window.</td></tr>
+          <tr><td><code>.ps1</code></td><td>Runs it through PowerShell.</td></tr>
+          <tr><td>A folder</td><td>Opens it in Explorer.</td></tr>
+          <tr><td>A link like <code>steam://run/250820</code></td><td>Hands it to Windows — which is how the built-in SteamVR and sound-settings shortcuts work.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <span class="ico">🎵</span>
+      <p><b>Microsoft Store apps</b> (Spotify, WhatsApp…) have no normal
+        <code>Program Files</code> path. Point at
+        <code>C:\Users\&lt;you&gt;\AppData\Local\Microsoft\WindowsApps\Spotify.exe</code> instead.</p>
+    </div>
+
+    <h3 style="margin-top:2rem">Pin it to the edge</h3>
+    <p class="lede">Right-click the bunny → <b>📌 Pin to Edge</b>. Windows now
+      reserves that strip of screen, exactly like it does for the taskbar, so
+      maximized windows stop at the dock instead of vanishing behind it. Vertical
+      docks pin right; horizontal docks pin to the top.</p>
+  </section>
+
+  <section id="menu">
+    <div class="sec-head"><span class="chip" style="--c: var(--orange)"></span><span class="eyebrow">Reference</span></div>
+    <h2>The bunny menu</h2>
+    <p class="lede">Right-click the bunny. Everything is here.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Item</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Switch to Horizontal / Vertical</td><td>Rotates the dock.</td></tr>
+          <tr><td>📌 Pin to Edge</td><td>Reserves screen space so maximized windows respect the dock.</td></tr>
+          <tr><td>🖥 Move Dock to Other Monitor</td><td>Sends the dock to your next screen.</td></tr>
+          <tr><td>🔄 Refresh Monitors</td><td>Re-detects displays after you plug one in.</td></tr>
+          <tr><td>📌 Pinned Apps</td><td>Add, edit or remove the app icons.</td></tr>
+          <tr><td>📂 Categories</td><td>Add a new shortcut group.</td></tr>
+          <tr><td>🎨 Themes</td><td>Neon Bunny (dark) or Pastel Bunny (light).</td></tr>
+          <tr><td>Start on Login</td><td>Launches HopperDock when Windows starts.</td></tr>
+          <tr><td>Tooltips</td><td>Turns the hover hints on or off.</td></tr>
+          <tr><td>⚙ Config → Export / Import</td><td>Saves or loads your whole setup as one file.</td></tr>
+          <tr><td>✕ Quit</td><td>Closes the dock. It also lives in your system tray.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:2.2rem">Where your settings live</h3>
+    <p class="lede">Everything is stored per-user, in
+      <code>%USERPROFILE%\WindowDock\</code> — never next to the app. Delete the
+      program folder and reinstall; your setup is still there.</p>
+    <div class="note">
+      <span class="ico">🛟</span>
+      <p>If one of those files ever fails to load, HopperDock <b>copies it aside</b>
+        as <code>&lt;name&gt;.corrupt-&lt;timestamp&gt;</code> before falling back to
+        defaults — so a bad byte can't silently erase your shortcuts. Saves are
+        atomic, too: an interrupted write can't leave a half-finished config.</p>
+    </div>
+  </section>
+
+  <section id="help">
+    <div class="sec-head"><span class="chip" style="--c: var(--teal)"></span><span class="eyebrow">If something's off</span></div>
+    <h2>Troubleshooting</h2>
+
+    <details>
+      <summary>Windows says it “protected your PC” and won't run it</summary>
+      <p>That's SmartScreen, and it appears for any app that isn't signed with a paid
+        certificate. Click <b>More info</b>, then <b>Run anyway</b>. If you'd rather not,
+        run it from source instead — the whole app is one readable Python file.</p>
+    </details>
+    <details>
+      <summary>The dock starts, then disappears</summary>
+      <p>Run <code>run_dock_visible.bat</code> to see the error, and check the log at
+        <code>%USERPROFILE%\WindowDock\logs\window_dock.log</code>.</p>
+    </details>
+    <details>
+      <summary>A layout didn't bring some windows back</summary>
+      <p>Windows are matched by title, so the app has to be open and showing roughly
+        the same title. If a program was closed, it can't be restored — reopen it and
+        re-save the layout.</p>
+    </details>
+    <details>
+      <summary>Maximized windows still hide behind the dock</summary>
+      <p>The dock is floating rather than pinned. Right-click the bunny →
+        <b>📌 Pin to Edge</b>.</p>
+    </details>
+    <details>
+      <summary>A pinned app relaunches instead of showing/hiding</summary>
+      <p>Its <b>Window Title</b> doesn't match the real window. Right-click the icon →
+        <b>Edit</b> and either correct it or clear the field. Clearing it is the right
+        move for apps that rewrite their own title bar, like media players.</p>
+    </details>
+    <details>
+      <summary>Some windows won't move at all</summary>
+      <p>They're probably running <b>as administrator</b>. Windows won't let a normal
+        program move an elevated one — run HopperDock as administrator too, and it can.</p>
+    </details>
+    <details>
+      <summary>Dragging files onto the dock does nothing</summary>
+      <p>The optional drag-and-drop package isn't installed. Run
+        <code>pip install tkinterdnd2</code> and restart. Everything else works without it.</p>
+    </details>
+  </section>
+
+  <footer>
+    <img src="bunny-small.png" alt="" width="56" height="56">
+    <p class="fine">HopperDock is free and open source under the MIT licence.<br>
+      Built by ScaryLasers because rearranging windows by hand got old.</p>
+    <div class="socials">
+      <a href="https://www.youtube.com/@ScaryLasers">YouTube</a>
+      <a href="https://twitch.tv/scarylasers">Twitch</a>
+      <a href="https://www.instagram.com/scarylasers_">Instagram</a>
+      <a href="https://www.tiktok.com/@scarylasers">TikTok</a>
+      <a href="https://github.com/scarylasers/HopperDock">GitHub</a>
+    </div>
+    <p class="fine">If it saves you some clicks, come say hi. 🐰</p>
+  </footer>
+
+</div>
+
+<script>
+// Hovering a dock button lights up its explanation, and vice versa.
+(function () {
+  var keys = document.querySelectorAll('.k[data-k]');
+  var rows = document.querySelectorAll('.row[data-k]');
+  function set(k, on) {
+    keys.forEach(function (el) { if (el.dataset.k === k) el.classList.toggle('on', on); });
+    rows.forEach(function (el) { if (el.dataset.k === k) el.classList.toggle('on', on); });
+  }
+  function bind(el) {
+    var k = el.dataset.k;
+    el.addEventListener('mouseenter', function () { set(k, true); });
+    el.addEventListener('mouseleave', function () { set(k, false); });
+    el.addEventListener('focus', function () { set(k, true); });
+    el.addEventListener('blur', function () { set(k, false); });
+  }
+  keys.forEach(bind);
+  rows.forEach(bind);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# HopperDock runtime dependencies.
+# Everything else it uses (tkinter, ctypes, winreg) ships with Python.
+Pillow>=10.0        # icon / logo loading and scaling
+pystray>=0.19       # system tray icon
+tkinterdnd2>=0.4    # OLE drag-and-drop onto the dock (optional but recommended)
+
+# For building the standalone .exe:
+#   pip install pyinstaller
+#   pyinstaller HopperDock.spec
