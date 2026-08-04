@@ -5,6 +5,17 @@ The shortcuts in the "Scripts" category on a fresh install point at the .bat
 files in this folder. They're here so a new install has something that
 actually runs, and so it's obvious where to put your own scripts.
 
+  hello-hopper.bat        prints where it ran from - a template to copy
+  open-scripts-folder.bat opens this folder in Explorer
+  kill-stuck-vr-app.bat   force-closes a VR game that didn't actually quit
+
+That last one is in the VR category rather than Scripts. Some Meta/Oculus
+titles leave their process running after you quit inside the headset, still
+holding the headset, your mic and the GPU. It's set to Population One by
+default because that one does it constantly - open the file and change the
+GAME line for any other title. To find a game's process name, look at the
+Name column in Task Manager's Details tab while it's running.
+
 Adding your own
 ---------------
 1. Drop a .bat / .cmd / .ps1 / .py file in here (or anywhere else).

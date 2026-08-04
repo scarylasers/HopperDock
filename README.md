@@ -4,11 +4,10 @@
 
 # HopperDock
 
-**A small floating toolbar for Windows that moves, tiles, and remembers where
-your windows live — plus a launcher for the apps and scripts you actually use.**
+**A small floating toolbar for Windows that tiles your windows, remembers exactly
+where they go, and launches the scripts you actually use.**
 
-Built for multi-monitor setups where "put everything back the way it was" is a
-thing you do ten times a day.
+Built for VR streamers and artists working on a small screen.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-ff2d95.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-00e5c0.svg)
@@ -24,6 +23,7 @@ thing you do ten times a day.
 
 ## Contents
 
+- [Why it exists](#why-it-exists)
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
 - [Install](#install)
@@ -40,6 +40,43 @@ thing you do ten times a day.
 
 ---
 
+## Why it exists
+
+I built this to stream VR.
+
+Streaming from a headset means juggling a pile of windows you can't see while
+you're in there — the headset mirror, OBS, chat, Voicemeeter, the game. Every
+session started with the same five minutes of dragging things into place, and
+the Windows taskbar was no help: you can't pin a script to it, can't group
+anything, and can't fit what you need.
+
+So the dock does the two jobs the taskbar won't: put my windows back where they
+belong, and give me one click for the things I run constantly.
+
+**What that looks like in practice:**
+
+- **Oculus Mirror** — the window that puts your headset view on stream, buried in
+  `Program Files\Oculus\Support\oculus-diagnostics\`. HopperDock finds it on
+  install and puts it one click away, along with the **Debug Tool** for when
+  you're fixing bitrate or encode lag mid-session.
+- **Killing a game that didn't quit** — some Meta titles (Population One is the
+  repeat offender) leave their process running after you quit inside the headset,
+  still holding the headset, your mic and the GPU. A two-line `taskkill` script on
+  the dock fixes it; that script ships in `examples/`.
+- **Rebuilding the stream layout** — tiling keeps OBS, chat, the mirror and the
+  audio mixer where you expect them, which matters when you're headset-blind and
+  reaching for a window you can't see. Save it once, restore it every session.
+- **Drawing away from the desk** — on a Wacom from the couch or a laptop, screen
+  space is scarce. Tiling arranges reference, canvas and palette instead of
+  stacking them, and pinning the dock means a maximized canvas stops beside it.
+
+Honestly, **the launcher outgrew the window management.** The taskbar can't hold a
+`.bat` file, can't group things, and runs out of room fast. The colour-coded
+categories turned out to be the part I use most — it's the taskbar I wanted.
+
+None of it is VR-specific; it's just as useful for editing, coding, or anything
+else with a routine.
+
 ## What it does
 
 - **Move every window to a monitor** in one click.
@@ -51,6 +88,9 @@ thing you do ten times a day.
 - **Pin apps** to the dock as icons, and show/hide them with a click.
 - **Dock to a screen edge** as a real Windows AppBar, so maximized windows
   stop underneath it instead of behind it.
+- **Find your VR tools automatically** — Oculus Mirror and the Debug Tool are
+  added to the starter VR category if the runtime is installed, and quietly
+  skipped if it isn't.
 - Vertical or horizontal, dark or light, on any monitor.
 
 ---
@@ -114,8 +154,8 @@ If you'd rather verify than trust:
 | Skip the exe | Use Option A — it's one readable Python file |
 
 ```
-SHA-256  HopperDock.exe  v1.5.0
-7C76BC9D50F9158D24919966582C9A8D6C6B7137C7DFCB4284D4991A6903FA97
+SHA-256  HopperDock.exe  v1.5.1
+9BCF63A4690D33EB46537068DB41A9294274923AD7B5DF242A71A88811A8613D
 ```
 
 **To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\WindowDock\`. If
@@ -135,7 +175,11 @@ that value again. Nothing else is touched.
 The dock appears as a floating vertical strip with a starter set of categories
 (VR, Audio, Apps, Scripts) already filled with example shortcuts that work on a
 stock Windows install — Notepad, Task Manager, Windows sound settings, SteamVR,
-and two example `.bat` files.
+and three example `.bat` files.
+
+If the Oculus runtime is installed, **Oculus Mirror** and the **Debug Tool** are
+added to the VR category too. If it isn't, they're skipped rather than left as
+dead shortcuts.
 
 Those `.bat` examples live in the `examples` folder next to the app. Open
 `examples/README.txt` for a short "add your own scripts" walkthrough. They're
@@ -205,9 +249,16 @@ header closes it again** — as does clicking the category button a second time.
 3. Click **+ Add Shortcut** and pick a file.
 4. Click the **✓** to leave edit mode.
 
-Or just **drag a file onto the dock**.
-
 In edit mode each shortcut grows a **×** to delete it.
+
+### Or drag things onto the dock
+
+| Drop this | You get |
+|---|---|
+| A file or shortcut | A **pinned app icon** at the bottom of the dock — an `.exe`, a `.lnk` from your Start Menu, a script, anything |
+| A folder | A whole **new category**, with every file inside it added as a shortcut |
+
+Dropping the same file twice won't duplicate it.
 
 ### Customising a category
 
