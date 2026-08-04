@@ -92,9 +92,35 @@ so you can see the error.
 
 ### Option B — the standalone .exe
 
-Download `HopperDock.exe` from the releases page and double-click it. No Python
-needed. Put it wherever you like; it stores its settings in your user profile,
-not next to the exe.
+Download `HopperDock.exe` from the [latest release](https://github.com/scarylasers/HopperDock/releases/latest)
+and double-click it. No Python needed. Put it wherever you like; it stores its
+settings in your user profile, not next to the exe.
+
+**Windows will warn you the first time.** You'll get a blue
+*"Windows protected your PC"* box. Click the small **More info** link, then the
+**Run anyway** button that appears. You only do this once.
+
+That warning shows up for any program Windows hasn't seen many people run yet.
+Publishers avoid it by buying a code-signing certificate — a few hundred dollars
+a year. HopperDock is free and made by one person, so it doesn't have one. The
+warning is about a missing receipt, not about anything found in the app.
+
+If you'd rather verify than trust:
+
+| To… | Do this |
+|---|---|
+| Check the file is the real one | `Get-FileHash HopperDock.exe` and compare to the SHA-256 below |
+| Get it scanned | Upload to [VirusTotal](https://www.virustotal.com/gui/home/upload) — free, ~70 engines |
+| Skip the exe | Use Option A — it's one readable Python file |
+
+```
+SHA-256  HopperDock.exe  v1.5.0
+7C76BC9D50F9158D24919966582C9A8D6C6B7137C7DFCB4284D4991A6903FA97
+```
+
+**To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\WindowDock\`. If
+you enabled **Start on Login**, turn it off from the bunny menu first — that's the
+only thing written outside its own folder.
 
 ### Start it automatically
 
@@ -161,7 +187,7 @@ icon replaces the number entirely.
 recorded with the position it would restore to, and comes back minimized to that
 same spot. Restoring a layout won't drag a minimized window onto your screen.
 
-> Layouts saved before v1.4 don't carry minimized state. Re-save the slot once
+> Layouts saved before v1.5 don't carry minimized state. Re-save the slot once
 > to pick it up.
 
 ---
@@ -350,7 +376,7 @@ Windows are matched by title. If the app was closed, or its title changed
 everything open the way you want it.
 
 **"Pin to Edge" leaves a gap at the edge.**
-Fixed in v1.4. If you're on an older build, restarting the dock clears the stale
+Fixed in v1.5. If you're on an older build, restarting the dock clears the stale
 AppBar reservation that caused it.
 
 **Maximized windows still hide behind the dock.**

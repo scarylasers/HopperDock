@@ -233,6 +233,24 @@ code:not(pre code) {
   background: var(--surface); border: 1px solid var(--hairline); border-radius: 4px;
 }
 
+/* ---- SmartScreen walk-through ---- */
+.ss { display: grid; gap: 1.5rem; grid-template-columns: minmax(0, 340px) 1fr; align-items: center; margin-top: 1.6rem; }
+@media (max-width: 720px) { .ss { grid-template-columns: 1fr; } }
+/* A flat mock of the real dialog so people recognise the screen on sight.
+   Deliberately Windows-grey, not themed — it must look like Windows, not us. */
+.ss-box {
+  background: #f0f0f0; color: #1b1b1b; border-radius: 8px; overflow: hidden;
+  border-top: 42px solid #0067b8; box-shadow: var(--shadow); padding: 1.1rem 1.2rem 1.2rem;
+  font-family: var(--font-body);
+}
+.ss-title { font-size: 1.15rem; font-weight: 600; margin-bottom: .5rem; }
+.ss-body { font-size: .84rem; line-height: 1.5; color: #3b3b3b; max-width: none; }
+.ss-more { font-size: .84rem; color: #0067b8; text-decoration: underline; margin: .9rem 0 0; max-width: none; }
+.ss-btns { display: flex; justify-content: flex-end; margin-top: 1.1rem; }
+.ss-btn { font-size: .82rem; background: #e1e1e1; border: 1px solid #adadad; border-radius: 3px; padding: .35rem 1.4rem; color: #1b1b1b; }
+.ss-steps { font-size: .96rem; }
+pre.hash { font-size: .7rem; word-break: break-all; white-space: pre-wrap; letter-spacing: .04em; margin-top: .45rem; }
+
 /* ---- tables ---- */
 .scroll { overflow-x: auto; margin-top: 1.1rem; border: 1px solid var(--hairline); border-radius: 9px; }
 table { border-collapse: collapse; width: 100%; font-size: .91rem; }
@@ -411,15 +429,11 @@ footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 
         <ol class="steps">
           <li>Download <code>HopperDock.exe</code> from the releases page.</li>
           <li>Put it anywhere you like — Desktop is fine.</li>
-          <li>Double-click it. The bunny appears.</li>
+          <li>Double-click it. <b>Windows will show a blue warning screen</b> —
+              that's expected. <a href="#smartscreen">Here's how to get past it</a>.</li>
+          <li>The bunny appears.</li>
           <li>Right-click the bunny → <b>Start on Login</b> so it's always there.</li>
         </ol>
-        <div class="note" style="margin-top:1.1rem">
-          <span class="ico">🛡</span>
-          <p>Windows may show a <b>“Windows protected your PC”</b> warning the first
-             time — that appears for any app without a paid code-signing certificate.
-             Click <b>More info → Run anyway</b>.</p>
-        </div>
       </div>
 
       <div class="path">
@@ -440,6 +454,76 @@ run_dock.bat</pre>
              program, but it keeps a console open so you can read the error.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section id="smartscreen">
+    <div class="sec-head"><span class="chip" style="--c: var(--pink)"></span><span class="eyebrow">Before you panic</span></div>
+    <h2>“Windows protected your PC”</h2>
+    <p class="lede">The first time you run <code>HopperDock.exe</code>, Windows will
+      stop you with a blue box. <b>Nothing is wrong.</b> Here's what it looks like
+      and how to get past it.</p>
+
+    <div class="ss">
+      <div class="ss-box" role="img" aria-label="Mock-up of the Windows SmartScreen dialog">
+        <div class="ss-title">Windows protected your PC</div>
+        <p class="ss-body">Microsoft Defender SmartScreen prevented an unrecognised
+          app from starting. Running this app might put your PC at risk.</p>
+        <p class="ss-more">More info</p>
+        <div class="ss-btns"><span class="ss-btn">Don't run</span></div>
+      </div>
+      <ol class="steps ss-steps">
+        <li>Click the small <b>More info</b> link — it's easy to miss, above the button.</li>
+        <li>The box expands and a <b>Run anyway</b> button appears at the bottom.</li>
+        <li>Click <b>Run anyway</b>. You'll only ever do this once.</li>
+      </ol>
+    </div>
+
+    <h3 style="margin-top:2rem">Why it happens</h3>
+    <p class="lede">SmartScreen warns about any program it hasn't seen many people
+      run before. Publishers avoid it by buying a <b>code-signing certificate</b> —
+      a few hundred dollars a year, renewed forever. HopperDock is free and made by
+      one person, so it doesn't have one. That's the whole story: the warning is
+      about a <em>missing receipt</em>, not about anything found in the app.</p>
+
+    <h3 style="margin-top:1.8rem">Don't take my word for it</h3>
+    <p class="lede">Fair enough — you're downloading an .exe from the internet.
+      Any of these are reasonable:</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>If you want to…</th><th>Do this</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Check the file is the real one</td>
+            <td>Compare its SHA-256 against the one below. Run
+              <code>Get-FileHash HopperDock.exe</code> in PowerShell.</td>
+          </tr>
+          <tr>
+            <td>Have it scanned by ~70 antivirus engines</td>
+            <td>Upload it to <a href="https://www.virustotal.com/gui/home/upload">VirusTotal</a> — free, no account.</td>
+          </tr>
+          <tr>
+            <td>Skip the .exe entirely</td>
+            <td>Run it from source instead. It's one readable Python file you can
+              look through first — see the other install option above.</td>
+          </tr>
+          <tr>
+            <td>Read what it actually does</td>
+            <td>All the code is <a href="https://github.com/scarylasers/HopperDock/blob/main/window_dock.pyw">right here</a>. It's MIT licensed.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="eyebrow" style="margin-top:1.4rem">SHA-256 — HopperDock.exe v1.5.0</p>
+    <pre class="hash">7C76BC9D50F9158D24919966582C9A8D6C6B7137C7DFCB4284D4991A6903FA97</pre>
+
+    <div class="note">
+      <span class="ico">🧹</span>
+      <p>Don't want it any more? Delete the <code>.exe</code>, then delete
+        <code>%USERPROFILE%\WindowDock\</code>. If you turned on <b>Start on Login</b>,
+        turn it off from the bunny menu first — that's the one thing it writes
+        outside its own folder.</p>
     </div>
   </section>
 
@@ -540,9 +624,17 @@ run_dock.bat</pre>
 
     <details>
       <summary>Windows says it “protected your PC” and won't run it</summary>
-      <p>That's SmartScreen, and it appears for any app that isn't signed with a paid
-        certificate. Click <b>More info</b>, then <b>Run anyway</b>. If you'd rather not,
-        run it from source instead — the whole app is one readable Python file.</p>
+      <p>Expected, and harmless — click <b>More info</b> then <b>Run anyway</b>.
+        There's a <a href="#smartscreen">full explanation with a checksum</a> further
+        up the page if you'd like to verify the download first.</p>
+    </details>
+    <details>
+      <summary>My antivirus flagged it</summary>
+      <p>Occasionally an engine flags PyInstaller-built apps generically, because
+        malware authors also use PyInstaller — it's the packaging method being
+        recognised, not the program. Verify with the
+        <a href="#smartscreen">SHA-256</a>, scan it on VirusTotal, or just run it
+        from source instead.</p>
     </details>
     <details>
       <summary>The dock starts, then disappears</summary>
