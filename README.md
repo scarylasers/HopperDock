@@ -154,8 +154,8 @@ If you'd rather verify than trust:
 | Skip the exe | Use Option A — it's one readable Python file |
 
 ```
-SHA-256  HopperDock.exe  v1.5.1
-9BCF63A4690D33EB46537068DB41A9294274923AD7B5DF242A71A88811A8613D
+SHA-256  HopperDock.exe  v1.5.2
+716FC1D3A9539C9ACF0E8EC197197BFDC0C7E1B88EB5C74CCDF915FE82A61FF1
 ```
 
 **To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\WindowDock\`. If
@@ -258,7 +258,17 @@ In edit mode each shortcut grows a **×** to delete it.
 | A file or shortcut | A **pinned app icon** at the bottom of the dock — an `.exe`, a `.lnk` from your Start Menu, a script, anything |
 | A folder | A whole **new category**, with every file inside it added as a shortcut |
 
+Dropped apps arrive wearing **their own icon** — it's pulled straight out of the
+program and cached in `%USERPROFILE%\WindowDock\icons\`. Microsoft Store apps
+work too: their launcher is a stub with no icon in it, so the packaged artwork
+is read instead.
+
 Dropping the same file twice won't duplicate it.
+
+> A shortcut whose target no longer exists (say, an app uninstalled or a
+> shortcut left behind by an old Windows profile) has no icon for Windows to
+> show, so it comes in with the generic document icon. That's a sign the
+> shortcut itself is broken, not the dock.
 
 ### Customising a category
 

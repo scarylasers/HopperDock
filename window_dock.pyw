@@ -9,13 +9,14 @@ import ctypes.wintypes
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import logging
 from datetime import datetime
 
-# tkinterdnd2 â€” OLE-based DnD that works on overrideredirect windows where
+# tkinterdnd2 — OLE-based DnD that works on overrideredirect windows where
 # the legacy WM_DROPFILES path silently no-ops. Optional: dock falls back
 # to the older code path if the package isn't bundled.
 try:
@@ -26,7 +27,7 @@ except Exception as _dnd_err:
     DND_FILES = '*'
     _DND_AVAILABLE = False
 
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 
 # Setup logging
 LOG_DIR = Path.home() / "WindowDock" / "logs"
@@ -83,8 +84,89 @@ SWP_FRAMECHANGED = 0x0020
 WPF_RESTORETOMAXIMIZED = 0x0002
 
 
+class SHFILEINFOW(ctypes.Structure):
+    _fields_ = [
+        ("hIcon", ctypes.wintypes.HICON),
+        ("iIcon", ctypes.c_int),
+        ("dwAttributes", ctypes.wintypes.DWORD),
+        ("szDisplayName", ctypes.c_wchar * 260),
+        ("szTypeName", ctypes.c_wchar * 80),
+    ]
+
+
+class ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon", ctypes.wintypes.BOOL),
+        ("xHotspot", ctypes.wintypes.DWORD),
+        ("yHotspot", ctypes.wintypes.DWORD),
+        ("hbmMask", ctypes.wintypes.HBITMAP),
+        ("hbmColor", ctypes.wintypes.HBITMAP),
+    ]
+
+
+class BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", ctypes.wintypes.DWORD),
+        ("biWidth", ctypes.c_long),
+        ("biHeight", ctypes.c_long),
+        ("biPlanes", ctypes.wintypes.WORD),
+        ("biBitCount", ctypes.wintypes.WORD),
+        ("biCompression", ctypes.wintypes.DWORD),
+        ("biSizeImage", ctypes.wintypes.DWORD),
+        ("biXPelsPerMeter", ctypes.c_long),
+        ("biYPelsPerMeter", ctypes.c_long),
+        ("biClrUsed", ctypes.wintypes.DWORD),
+        ("biClrImportant", ctypes.wintypes.DWORD),
+    ]
+
+
+SHGFI_ICON = 0x000000100
+SHGFI_LARGEICON = 0x000000000
+SHGFI_ICONLOCATION = 0x000001000
+SHGFI_SYSICONINDEX = 0x000004000
+DIB_RGB_COLORS = 0
+
+# Microsoft Store apps are launched through a zero-byte "app execution alias"
+# in WindowsApps, which is a reparse point rather than a real executable —
+# so there's no icon in it to extract until it's resolved.
+FSCTL_GET_REPARSE_POINT = 0x000900A8
+FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+IO_REPARSE_TAG_APPEXECLINK = 0x8000001B
+OPEN_EXISTING = 3
+
+# Explicit signatures — on x64 the ctypes default of c_int truncates handles
+# and pointers, which silently yields garbage rather than an error.
+shell32.SHGetFileInfoW.argtypes = [ctypes.c_wchar_p, ctypes.wintypes.DWORD,
+                                   ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+shell32.SHGetFileInfoW.restype = ctypes.c_void_p
+user32.PrivateExtractIconsW.argtypes = [
+    ctypes.c_wchar_p, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.POINTER(ctypes.wintypes.HICON), ctypes.POINTER(ctypes.c_uint),
+    ctypes.c_uint, ctypes.c_uint]
+user32.PrivateExtractIconsW.restype = ctypes.c_uint
+user32.GetIconInfo.argtypes = [ctypes.wintypes.HICON, ctypes.c_void_p]
+user32.GetIconInfo.restype = ctypes.wintypes.BOOL
+user32.DestroyIcon.argtypes = [ctypes.wintypes.HICON]
+user32.DestroyIcon.restype = ctypes.wintypes.BOOL
+
+# GDI handles are pointer-sized. Without these the default c_int truncates
+# them and raises "int too long to convert" for any handle above 2^31.
+gdi32 = ctypes.windll.gdi32
+gdi32.CreateCompatibleDC.argtypes = [ctypes.wintypes.HDC]
+gdi32.CreateCompatibleDC.restype = ctypes.wintypes.HDC
+gdi32.DeleteDC.argtypes = [ctypes.wintypes.HDC]
+gdi32.DeleteDC.restype = ctypes.wintypes.BOOL
+gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+gdi32.DeleteObject.restype = ctypes.wintypes.BOOL
+gdi32.GetDIBits.argtypes = [ctypes.wintypes.HDC, ctypes.wintypes.HBITMAP,
+                            ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+                            ctypes.c_void_p, ctypes.c_uint]
+gdi32.GetDIBits.restype = ctypes.c_int
+
+
 class WINDOWPLACEMENT(ctypes.Structure):
-    """Lets us read a minimized window's *restore* rect â€” its live
+    """Lets us read a minimized window's *restore* rect — its live
     GetWindowRect is a bogus off-screen (-32000) placeholder."""
     _fields_ = [
         ("length", ctypes.wintypes.UINT),
@@ -140,7 +222,7 @@ class APPBARDATA(ctypes.Structure):
         ("lParam", ctypes.wintypes.LPARAM),
     ]
 
-# Magenta chroma key â€” pixels of this exact RGB are made fully transparent
+# Magenta chroma key — pixels of this exact RGB are made fully transparent
 # via wm_attributes('-transparentcolor', ...) in collapsed peek mode so only
 # the bunny image, accent stripe, and colored peek tabs show.
 COLLAPSED_CHROMA = '#ff00ff'
@@ -149,7 +231,7 @@ COLLAPSED_CHROMA = '#ff00ff'
 # calls set_theme(name) which mutates THEME in place so existing references
 # pick up the new colors on the next _create_ui() rebuild.
 THEMES = {
-    # Neon Bunny â€” dark grey w/ neon pink+teal accents
+    # Neon Bunny — dark grey w/ neon pink+teal accents
     'dark': {
         'bg': '#1e1e1e',
         'bg_mid': '#2d2d2d',
@@ -167,7 +249,7 @@ THEMES = {
         'text_dim': '#888888',
         'border': '#ff2e97',
     },
-    # Pastel Bunny â€” soft off-white w/ darker accents tuned for contrast on light bg
+    # Pastel Bunny — soft off-white w/ darker accents tuned for contrast on light bg
     'light': {
         'bg': '#fafafa',
         'bg_mid': '#ececec',
@@ -187,7 +269,7 @@ THEMES = {
     },
 }
 
-# Active theme â€” mutated in place by set_theme() so all THEME[...] lookups stay valid
+# Active theme — mutated in place by set_theme() so all THEME[...] lookups stay valid
 THEME = dict(THEMES['dark'])
 
 def set_theme(name):
@@ -201,7 +283,7 @@ def set_theme(name):
 LAYOUT_SLOTS = 4
 
 # Icon pixel size for dock buttons. Shared by pinned apps, categories and
-# layout slots so the whole strip reads as one consistent stack â€” these used
+# layout slots so the whole strip reads as one consistent stack — these used
 # to drift (pinned apps 38px vs categories 18px, which looked broken).
 DOCK_ICON_SIZE_VERTICAL = 38
 DOCK_ICON_SIZE_HORIZONTAL = 20
@@ -212,7 +294,7 @@ DOCK_TEXT_WIDTH_VERTICAL = 6   # fits the default "SCRIPT" label
 DOCK_TEXT_WIDTH_HORIZONTAL = 4
 
 # Preferred starting folder for icon pickers. Falls back to the user's home
-# when it doesn't exist, so this is just a convenience â€” not a requirement.
+# when it doesn't exist, so this is just a convenience — not a requirement.
 _ICON_DIR_CANDIDATES = (r"C:\icons",)
 
 
@@ -224,7 +306,7 @@ def _default_icon_dir():
 
 
 def _app_dir():
-    """Folder HopperDock lives in â€” the .exe's folder in a frozen build,
+    """Folder HopperDock lives in — the .exe's folder in a frozen build,
     this script's folder when running from source."""
     if getattr(sys, 'frozen', False):
         return Path(sys.executable).parent
@@ -236,8 +318,8 @@ def _examples_dir():
 
     Running from source that's examples/ next to the script. In a frozen
     one-file build the bundled copy lives in a _MEIPASS temp dir that is
-    deleted and re-created with a different name on every launch â€” saving that
-    path into shortcuts.json would give a dead shortcut on the second run â€” so
+    deleted and re-created with a different name on every launch — saving that
+    path into shortcuts.json would give a dead shortcut on the second run — so
     seed a stable copy under the user's config folder and point there instead.
     """
     local = _app_dir() / 'examples'
@@ -264,7 +346,7 @@ def _example_script(filename):
 
 
 # Meta/Oculus desktop tools, if the user has the runtime installed. Added to
-# the starter VR category only when present â€” a shortcut to a file that isn't
+# the starter VR category only when present — a shortcut to a file that isn't
 # there is worse than no shortcut.
 _OPTIONAL_VR_TOOLS = (
     # Mirror casts the headset view to a desktop window — the thing you
@@ -581,7 +663,7 @@ class LayoutManager:
         Two things matter here. First, `utf-8-sig`: a BOM (which several
         editors and PowerShell's `-Encoding utf8` add) is not corruption, and
         must not be treated as such. Second, if the file genuinely won't
-        parse, the original is copied aside before we fall back to defaults â€”
+        parse, the original is copied aside before we fall back to defaults —
         otherwise the next routine save silently overwrites it and the user's
         shortcuts/layouts are gone for good.
         """
@@ -646,7 +728,7 @@ class LayoutManager:
             minimized = bool(win.get('minimized'))
             if minimized or maximized:
                 # Live rect is either the -32000 minimized placeholder or the
-                # maximized rect â€” neither is what we want to restore to.
+                # maximized rect — neither is what we want to restore to.
                 placement = WindowManager.get_restore_placement(win['hwnd'])
                 if placement:
                     x, y, width, height, restores_max = placement
@@ -677,7 +759,7 @@ class LayoutManager:
             for win in current_windows:
                 if win['title'] == saved['title']:
                     hwnd = win['hwnd']
-                    # Un-minimize first â€” SetWindowPos on a minimized window
+                    # Un-minimize first — SetWindowPos on a minimized window
                     # updates the restore rect but nothing visible happens.
                     if user32.IsIconic(hwnd):
                         user32.ShowWindow(hwnd, SW_RESTORE)
@@ -729,7 +811,7 @@ class LayoutManager:
         self.save_settings(self.settings)
 
     def layout_label(self, slot):
-        """Display name for a slot â€” the custom label, else the slot name."""
+        """Display name for a slot — the custom label, else the slot name."""
         return self.get_layout_meta(slot).get('label') or slot
 
 
@@ -766,7 +848,7 @@ class ShortcutPopup(tk.Toplevel):
 
         self._create_ui()
         ShortcutPopup._reposition_all_popups()
-        # Now reveal the popup atomically â€” built + positioned in one paint
+        # Now reveal the popup atomically — built + positioned in one paint
         self.deiconify()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -871,7 +953,7 @@ class ShortcutPopup(tk.Toplevel):
                     pass
 
     def _create_expanded_ui(self):
-        """Full panel with shortcuts â€” header click closes the popout."""
+        """Full panel with shortcuts — header click closes the popout."""
         wrapper = tk.Frame(self, bg=THEME['bg'])
         wrapper.pack(fill=tk.BOTH, expand=True)
 
@@ -882,7 +964,7 @@ class ShortcutPopup(tk.Toplevel):
         main = tk.Frame(wrapper, bg=THEME['bg'])
         main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Clickable header tab â€” left part collapses, right pen toggles edit mode
+        # Clickable header tab — left part collapses, right pen toggles edit mode
         header = tk.Frame(main, bg=self.color)
         header.pack(fill=tk.X)
 
@@ -892,21 +974,21 @@ class ShortcutPopup(tk.Toplevel):
                                bg=self.color, fg=THEME['bg'], pady=5, padx=8, anchor='w',
                                cursor='hand2')
         header_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Clicking the header closes the popout entirely â€” the dock's category
+        # Clicking the header closes the popout entirely — the dock's category
         # button reopens it. (It used to collapse into a slide-out tab.)
         def _on_header(e):
             self.after_idle(self._on_close)
             return "break"
         header_label.bind('<Button-1>', _on_header)
 
-        # Pencil icon â€” right-justified, toggles edit mode (âœ“ when active)
-        pen_text = "âœ“" if self.edit_mode else "âœ"
+        # Pencil icon — right-justified, toggles edit mode (✓ when active)
+        pen_text = "✓" if self.edit_mode else "✏"
         pen_label = tk.Label(header, text=pen_text,
                             font=('Segoe UI Emoji', 11, 'bold'),
                             bg=self.color, fg=THEME['bg'], padx=10, pady=4, cursor='hand2')
         pen_label.pack(side=tk.RIGHT)
         # after_idle defers the destroy/rebuild until tkinter finishes
-        # delivering THIS click event â€” prevents the click from hitting the
+        # delivering THIS click event — prevents the click from hitting the
         # window underneath when the pen widget is destroyed mid-dispatch.
         # Returning "break" stops further propagation.
         def _on_pen(e):
@@ -930,7 +1012,7 @@ class ShortcutPopup(tk.Toplevel):
             tk.Label(inner, text="No shortcuts yet", font=('Segoe UI', 8),
                     bg=THEME['bg'], fg=THEME['text_dim']).pack(pady=10)
 
-        # Bottom add button â€” only shown in edit mode
+        # Bottom add button — only shown in edit mode
         if self.edit_mode:
             btn_frame = tk.Frame(inner, bg=THEME['bg'])
             btn_frame.pack(fill=tk.X, pady=(10, 0))
@@ -984,7 +1066,7 @@ class ShortcutPopup(tk.Toplevel):
         btn.bind('<Leave>', lambda e, b=btn: b.config(bg=THEME['bg_mid']))
 
         if self.edit_mode:
-            del_btn = tk.Label(frame, text="Ã—", font=('Segoe UI', 11, 'bold'),
+            del_btn = tk.Label(frame, text="×", font=('Segoe UI', 11, 'bold'),
                               bg=THEME['bg_mid'], fg=THEME['pink_dark'],
                               padx=6, cursor='hand2')
             del_btn.pack(side=tk.RIGHT)
@@ -1056,7 +1138,7 @@ class WindowDock(_DOCK_BASE):
 
         self._setup_window()
         # Keep the window hidden until we've placed it at the correct
-        # edge â€” avoids the visible flash on the wrong side at startup
+        # edge — avoids the visible flash on the wrong side at startup
         self.withdraw()
         self._create_ui()
         self._make_draggable()
@@ -1086,7 +1168,7 @@ class WindowDock(_DOCK_BASE):
             # Reveal window only after final position is set so the user
             # never sees the dock flash on the wrong edge
             self.deiconify()
-            # Set up drag-drop AFTER the window is visible â€” DragAcceptFiles
+            # Set up drag-drop AFTER the window is visible — DragAcceptFiles
             # and the wndproc subclass apply more reliably on a shown window
             self._setup_drag_drop()
         self.after(200, _finalize_startup)
@@ -1103,7 +1185,7 @@ class WindowDock(_DOCK_BASE):
         return False
 
     def _move_to_primary_monitor(self):
-        """Default starting position: vertical â†’ right edge, horizontal â†’
+        """Default starting position: vertical → right edge, horizontal →
         top center of the primary monitor."""
         primary = WindowManager.get_primary_monitor(self.monitors)
         if primary:
@@ -1210,7 +1292,7 @@ class WindowDock(_DOCK_BASE):
     def _enable_drag_drop(self):
         """Enable Windows drag-drop on the window"""
         try:
-            # Set explicit argtypes â€” ctypes' default int is 32-bit, which
+            # Set explicit argtypes — ctypes' default int is 32-bit, which
             # would truncate HWND on x64 and silently no-op DragAcceptFiles.
             user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
             user32.FindWindowW.restype = ctypes.wintypes.HWND
@@ -1316,8 +1398,196 @@ class WindowDock(_DOCK_BASE):
         except Exception as e:
             logger.error(f"Drop handling error: {e}", exc_info=True)
 
+    @staticmethod
+    def _hicon_to_image(hicon):
+        """Convert an HICON into a PIL RGBA image, or None."""
+        from PIL import Image
+        info = ICONINFO()
+        if not user32.GetIconInfo(hicon, ctypes.byref(info)):
+            return None
+        try:
+            bmp = BITMAPINFOHEADER()
+            bmp.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            hdc = gdi32.CreateCompatibleDC(0)
+            try:
+                # Query the colour bitmap's real dimensions first
+                if not gdi32.GetDIBits(hdc, info.hbmColor, 0, 0, None,
+                                       ctypes.byref(bmp), DIB_RGB_COLORS):
+                    return None
+                w, h = bmp.biWidth, abs(bmp.biHeight)
+                if not w or not h:
+                    return None
+                # Negative height => top-down rows, so no flip needed after
+                bmp.biHeight = -h
+                bmp.biBitCount = 32
+                bmp.biCompression = 0
+                bmp.biPlanes = 1
+                buf = ctypes.create_string_buffer(w * h * 4)
+                if not gdi32.GetDIBits(hdc, info.hbmColor, 0, h, buf,
+                                       ctypes.byref(bmp), DIB_RGB_COLORS):
+                    return None
+                img = Image.frombuffer('RGBA', (w, h), buf.raw, 'raw', 'BGRA', 0, 1)
+                # Icons with no alpha channel come back fully transparent;
+                # fall back to the mask bitmap in that case.
+                if img.getchannel('A').getextrema() == (0, 0):
+                    img.putalpha(255)
+                return img.copy()
+            finally:
+                gdi32.DeleteDC(hdc)
+        finally:
+            for h_bmp in (info.hbmColor, info.hbmMask):
+                if h_bmp:
+                    gdi32.DeleteObject(h_bmp)
+
+    @staticmethod
+    def _cache_icon(img, source_path):
+        """Save an extracted icon under the user's config folder and return
+        its path, so shortcuts.json references a stable file."""
+        cache = Path.home() / "WindowDock" / "icons"
+        cache.mkdir(parents=True, exist_ok=True)
+        safe = re.sub(r'[^A-Za-z0-9_.-]', '_', Path(source_path).stem)[:48] or 'icon'
+        dest = cache / f"{safe}.png"
+        img.save(dest)
+        logger.info(f"Extracted icon for {Path(source_path).name} -> {dest}")
+        return str(dest)
+
+    @staticmethod
+    def _store_app_icon(path):
+        """For a Store app's execution alias, return its packaged logo PNG.
+
+        The alias is a zero-byte reparse point with no icon of its own; the
+        real artwork lives in the package's Assets folder. Returns None for
+        anything that isn't a Store alias.
+        """
+        try:
+            if Path(path).stat().st_size:
+                return None  # a real file — normal extraction will handle it
+        except OSError:
+            return None
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateFileW(
+            str(path), 0, 3, None, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, None)
+        if handle in (-1, ctypes.c_void_p(-1).value):
+            return None
+        try:
+            buf = ctypes.create_string_buffer(16384)
+            written = ctypes.wintypes.DWORD()
+            if not kernel32.DeviceIoControl(
+                    ctypes.c_void_p(handle), FSCTL_GET_REPARSE_POINT, None, 0,
+                    buf, ctypes.sizeof(buf), ctypes.byref(written), None):
+                return None
+            if int.from_bytes(buf.raw[0:4], 'little') != IO_REPARSE_TAG_APPEXECLINK:
+                return None
+            # After the 8-byte header and a version DWORD: NUL-separated
+            # UTF-16 strings — package family, app id, target exe, flags.
+            parts = [s for s in buf.raw[12:written.value]
+                     .decode('utf-16-le', errors='ignore').split('\x00') if s]
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+        target = next((s for s in parts if s.lower().endswith('.exe')), None)
+        if not target:
+            return None
+        assets = Path(target).parent / 'Assets'
+        if not assets.is_dir():
+            return None
+        # Prefer the largest unplated square logo — that's the transparent
+        # artwork, without the coloured tile Windows puts behind Start icons.
+        best, best_px = None, 0
+        for candidate in assets.glob('*Square*Logo*.png'):
+            name = candidate.name.lower()
+            if 'contrast' in name:
+                continue  # high-contrast variants are monochrome
+            try:
+                from PIL import Image
+                with Image.open(candidate) as im:
+                    px = im.size[0] * im.size[1]
+            except Exception:
+                continue
+            if 'unplated' in name:
+                px *= 2  # tie-break toward transparent artwork
+            if px > best_px:
+                best, best_px = candidate, px
+        return best
+
+    def _extract_icon_for(self, path, size=64):
+        """Pull the icon Windows shows for `path` and cache it as a PNG.
+
+        Works for .exe, .lnk, .url and anything else with a shell icon. Tries
+        PrivateExtractIcons at a large size first (so a modern app's 256px
+        icon isn't upscaled from 32px), then falls back to SHGetFileInfo.
+        Returns a PNG path, or '' if nothing could be extracted.
+        """
+        try:
+            from PIL import Image  # noqa: F401 - fail fast if Pillow is absent
+        except Exception:
+            return ''
+
+        hicon = None
+        try:
+            # Store apps first — their alias has no extractable icon at all.
+            packaged = self._store_app_icon(path)
+            if packaged:
+                img = Image.open(packaged).convert('RGBA')
+                if img.size != (size, size):
+                    img = img.resize((size, size), Image.LANCZOS)
+                return self._cache_icon(img, path)
+
+            # Candidate icon sources, best quality first. PrivateExtractIcons
+            # reads a PE's icon resources at whatever size we ask for, but only
+            # works on files that HAVE resources (.exe/.dll/.ico) — a .lnk has
+            # none, so SHGFI_ICONLOCATION is asked where the real icon lives.
+            candidates = []
+            shfi = SHFILEINFOW()
+            shell32.SHGetFileInfoW(str(path), 0, ctypes.byref(shfi),
+                                   ctypes.sizeof(shfi), SHGFI_ICONLOCATION)
+            if shfi.szDisplayName:
+                candidates.append((shfi.szDisplayName, shfi.iIcon))
+            candidates.append((str(path), 0))
+
+            nid = ctypes.c_uint()
+            for src, index in candidates:
+                for want in (256, 128, 64, 48, 32):
+                    h = ctypes.wintypes.HICON()
+                    if user32.PrivateExtractIconsW(src, index, want, want,
+                                                   ctypes.byref(h),
+                                                   ctypes.byref(nid), 1, 0) and h.value:
+                        hicon = h.value
+                        break
+                if hicon:
+                    break
+
+            # Shell fallback — the one that works for .lnk, .url and folders.
+            if not hicon:
+                shfi = SHFILEINFOW()
+                shell32.SHGetFileInfoW(str(path), 0, ctypes.byref(shfi),
+                                       ctypes.sizeof(shfi),
+                                       SHGFI_ICON | SHGFI_LARGEICON)
+                hicon = shfi.hIcon
+
+            if not hicon:
+                return ''
+
+            img = self._hicon_to_image(hicon)
+            if img is None:
+                return ''
+            if img.size != (size, size):
+                img = img.resize((size, size), Image.LANCZOS)
+            return self._cache_icon(img, path)
+        except Exception as e:
+            logger.warning(f"Icon extraction failed for {path}: {e}")
+            return ''
+        finally:
+            if hicon:
+                try:
+                    user32.DestroyIcon(hicon)
+                except Exception:
+                    pass
+
     def _add_dropped_shortcuts(self, file_paths):
-        """File â†’ pinned app on the dock. Folder â†’ new category whose
+        """File → pinned app on the dock. Folder → new category whose
         shortcuts are the files inside that folder (recursing one level)."""
         if not file_paths:
             return
@@ -1356,7 +1626,10 @@ class WindowDock(_DOCK_BASE):
                     apps.append({
                         "name": p.stem or p.name,
                         "path": str(p),
-                        "icon": "",
+                        # Use the app's own icon rather than dropping in a
+                        # bare text label — that's what makes a dropped app
+                        # look like it belongs on the dock.
+                        "icon": self._extract_icon_for(p),
                         "window_title": p.stem,
                         "launch_cmd": launch_cmd,
                     })
@@ -1516,7 +1789,7 @@ class WindowDock(_DOCK_BASE):
             bunny_label = tk.Label(row, image=bunny_photo, bg=THEME['bg'], cursor='hand2')
             bunny_label._photo_ref = bunny_photo
         else:
-            bunny_label = tk.Label(row, text="ðŸ°", font=('Segoe UI Emoji', 18),
+            bunny_label = tk.Label(row, text="🐰", font=('Segoe UI Emoji', 18),
                                    bg=THEME['bg'], fg=THEME['pink'], cursor='hand2')
         bunny_label.pack(side=tk.LEFT, padx=(0, 8))
         self._bind_drag_to(bunny_label)
@@ -1551,7 +1824,7 @@ class WindowDock(_DOCK_BASE):
 
         self._create_separator(row, vertical=True)
 
-        # Categories â€” compact icon buttons inline; click pops out shortcuts
+        # Categories — compact icon buttons inline; click pops out shortcuts
         self._render_categories(row)
 
         self._create_separator(row, vertical=True)
@@ -1590,13 +1863,13 @@ class WindowDock(_DOCK_BASE):
         main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._bind_drag_to(main_frame)
 
-        # Bunny logo â€” large, centered above the bar
+        # Bunny logo — large, centered above the bar
         bunny_photo = self._get_bunny_photo(40)
         if bunny_photo:
             bunny_label = tk.Label(main_frame, image=bunny_photo, bg=THEME['bg'], cursor='hand2')
             bunny_label._photo_ref = bunny_photo
         else:
-            bunny_label = tk.Label(main_frame, text="ðŸ°", font=('Segoe UI Emoji', 24),
+            bunny_label = tk.Label(main_frame, text="🐰", font=('Segoe UI Emoji', 24),
                                    bg=THEME['bg'], fg=THEME['pink'], cursor='hand2')
         bunny_label.pack(pady=(2, 4))
         self._bind_drag_to(bunny_label)
@@ -1635,7 +1908,7 @@ class WindowDock(_DOCK_BASE):
         sep_cat = tk.Frame(main_frame, bg=THEME['pink'], height=1)
         sep_cat.pack(fill=tk.X, padx=1, pady=3)
 
-        # Inline categories â€” collapsible sections
+        # Inline categories — collapsible sections
         self._render_categories(main_frame)
 
         # Spacer to push pinned apps to bottom
@@ -1664,14 +1937,14 @@ class WindowDock(_DOCK_BASE):
             btn.bind('<Button-3>', lambda e, i=idx: self._pinned_app_context(e, i))
             self._add_tooltip(btn, app.get('name', 'App'))
 
-        # (Bottom "â€”" minimize button removed â€” click the bunny at top to minimize.)
+        # (Bottom "—" minimize button removed — click the bunny at top to minimize.)
 
     def _create_pinned_tab_ui(self):
-        """Collapsed dock view â€” orientation aware. Same Canvas-based rounded
+        """Collapsed dock view — orientation aware. Same Canvas-based rounded
         tabs in both modes. Vertical: column, tabs flush to right edge with
         rounded LEFT corners. Horizontal: row, tabs hang below dock with
         rounded BOTTOM corners. Background uses chroma magenta which the
-        window-level transparentcolor renders fully transparent â€” only the
+        window-level transparentcolor renders fully transparent — only the
         bunny image, accent stripe, and colored peek tabs are visible."""
         bg = COLLAPSED_CHROMA
         accent_color = THEME['pink']
@@ -1689,7 +1962,7 @@ class WindowDock(_DOCK_BASE):
                 bunny = tk.Label(inner, image=bunny_photo, bg=bg, cursor='hand2')
                 bunny._photo_ref = bunny_photo
             else:
-                bunny = tk.Label(inner, text="ðŸ°", font=('Segoe UI Emoji', 22),
+                bunny = tk.Label(inner, text="🐰", font=('Segoe UI Emoji', 22),
                                 bg=bg, fg=THEME['pink'], cursor='hand2')
             bunny.pack(pady=(4, 4), padx=4)
             bunny.bind('<Button-1>', lambda e: self._toggle_dock_visibility())
@@ -1697,7 +1970,7 @@ class WindowDock(_DOCK_BASE):
 
             tk.Frame(inner, bg=accent_color, height=1).pack(fill=tk.X, pady=(0, 4))
 
-            # Tabs fill full dock width (no padding) â€” rounded LEFT corners,
+            # Tabs fill full dock width (no padding) — rounded LEFT corners,
             # sharp right (flush w/ screen edge). Polygon redrawn on Configure
             # so it tracks the actual canvas width.
             TAB_H = 88
@@ -1723,7 +1996,7 @@ class WindowDock(_DOCK_BASE):
                                    fill=text_fill)
             for category in self.lm.categories:
                 color = THEME.get(category.get('color', 'pink'), THEME['pink'])
-                # width=1 overrides Canvas's default 378 â€” fill=tk.X expands to parent
+                # width=1 overrides Canvas's default 378 — fill=tk.X expands to parent
                 canvas = tk.Canvas(inner, bg=bg, width=1, height=TAB_H,
                                   highlightthickness=0, bd=0, cursor='hand2')
                 canvas.pack(fill=tk.X, pady=0, padx=0)
@@ -1732,7 +2005,7 @@ class WindowDock(_DOCK_BASE):
                             lambda e, c=canvas, col=color, lt=label_text: _redraw_v(c, col, lt))
                 canvas.bind('<Button-1>',
                             lambda e, cat=category: self._expand_and_open(cat))
-                self._add_tooltip(canvas, f"{category['name']} â€” click to open")
+                self._add_tooltip(canvas, f"{category['name']} — click to open")
 
             for w in [outer, inner]:
                 w.bind('<Button-1>', lambda e: self._toggle_dock_visibility())
@@ -1749,7 +2022,7 @@ class WindowDock(_DOCK_BASE):
                                 padx=6, pady=2)
                 bunny._photo_ref = bunny_photo
             else:
-                bunny = tk.Label(inner, text="ðŸ°", font=('Segoe UI Emoji', 16),
+                bunny = tk.Label(inner, text="🐰", font=('Segoe UI Emoji', 16),
                                 bg=bg, fg=THEME['pink'], cursor='hand2',
                                 padx=6, pady=2)
             bunny.pack(side=tk.LEFT)
@@ -1787,14 +2060,14 @@ class WindowDock(_DOCK_BASE):
                             lambda e, c=canvas, col=color, lt=label_text: _redraw_h(c, col, lt))
                 canvas.bind('<Button-1>',
                             lambda e, cat=category: self._expand_and_open(cat))
-                self._add_tooltip(canvas, f"{category['name']} â€” click to open")
+                self._add_tooltip(canvas, f"{category['name']} — click to open")
 
             for w in [outer, inner]:
                 w.bind('<Button-1>', lambda e: self._toggle_dock_visibility())
                 w.bind('<Button-3>', self._show_bunny_menu)
 
     def _expand_and_open(self, category):
-        """Click on a peek tab â€” open ONLY that category's popup. The dock
+        """Click on a peek tab — open ONLY that category's popup. The dock
         stays collapsed; popup floats next to the peek strip."""
         self._toggle_shortcut_sidebar(category)
 
@@ -1818,7 +2091,7 @@ class WindowDock(_DOCK_BASE):
                     break
 
     def _toggle_shortcut_sidebar(self, category):
-        """Toggle a sidebar â€” multiple can be open at once"""
+        """Toggle a sidebar — multiple can be open at once"""
         self._open_sidebars = getattr(self, '_open_sidebars', {})
         cat_name = category['name']
 
@@ -1836,7 +2109,7 @@ class WindowDock(_DOCK_BASE):
         self._build_shortcut_sidebar(category)
 
     def _close_sidebar(self, category):
-        """Close a sidebar outright â€” the dock button reopens it."""
+        """Close a sidebar outright — the dock button reopens it."""
         if category['name'] in getattr(self, '_open_sidebars', {}):
             self._toggle_shortcut_sidebar(category)
 
@@ -1862,7 +2135,7 @@ class WindowDock(_DOCK_BASE):
     def _build_shortcut_sidebar(self, category):
         """Build (or rebuild) the shortcut sidebar for a category. Styled to
         match horizontal popup tabs: solid category-colored header + content
-        area. Clicking the header closes it â€” the dock button reopens it."""
+        area. Clicking the header closes it — the dock button reopens it."""
         cat_name = category['name']
         self._open_sidebars = getattr(self, '_open_sidebars', {})
         if not hasattr(self, '_sidebar_edit_mode'):
@@ -1895,14 +2168,14 @@ class WindowDock(_DOCK_BASE):
                                anchor='w', cursor='hand2')
         header_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         # after_idle so the destroy happens after tkinter finishes delivering
-        # THIS click â€” otherwise it lands on whatever is underneath.
+        # THIS click — otherwise it lands on whatever is underneath.
         def _on_header(e, c=category):
             self.after_idle(lambda: self._close_sidebar(c))
             return "break"
         header_label.bind('<Button-1>', _on_header)
 
         # Pencil toggle right-justified in colored header
-        pen_text = "âœ“" if edit_on else "âœ"
+        pen_text = "✓" if edit_on else "✏"
         pen_btn = tk.Label(header, text=pen_text,
                           font=('Segoe UI Emoji', 11, 'bold'),
                           bg=color, fg=THEME['bg'], padx=10, pady=4,
@@ -1931,7 +2204,7 @@ class WindowDock(_DOCK_BASE):
                 sc_btn.bind('<Leave>', lambda e, b=sc_btn: b.config(bg=THEME['bg_mid']))
 
                 if edit_on:
-                    del_btn = tk.Label(row, text="Ã—", font=('Segoe UI', 11, 'bold'),
+                    del_btn = tk.Label(row, text="×", font=('Segoe UI', 11, 'bold'),
                                       bg=THEME['bg_mid'], fg=THEME['pink_dark'],
                                       padx=6, cursor='hand2')
                     del_btn.pack(side=tk.RIGHT)
@@ -1956,7 +2229,7 @@ class WindowDock(_DOCK_BASE):
         self._create_ui()
 
     def _toggle_sidebar_edit(self, category):
-        """Toggle edit-mode (âœ• delete buttons + add btn visibility) for a sidebar."""
+        """Toggle edit-mode (✕ delete buttons + add btn visibility) for a sidebar."""
         if not hasattr(self, '_sidebar_edit_mode'):
             self._sidebar_edit_mode = {}
         cat_name = category['name']
@@ -1983,7 +2256,7 @@ class WindowDock(_DOCK_BASE):
         menu = tk.Menu(self, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                       activebackground=THEME['pink'], activeforeground=THEME['bg'],
                       font=('Segoe UI', 9), relief=tk.FLAT, bd=0)
-        menu.add_command(label=f"âœ• Delete '{shortcut.get('name')}'",
+        menu.add_command(label=f"✕ Delete '{shortcut.get('name')}'",
                         command=lambda: self._sidebar_delete_shortcut(shortcut, category))
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -2143,21 +2416,21 @@ class WindowDock(_DOCK_BASE):
         m = tk.Menu(self, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                     activebackground=THEME['pink'], activeforeground=THEME['bg'],
                     font=('Segoe UI', 9))
-        m.add_command(label="ðŸ’¾ Save Layout Here",
+        m.add_command(label="💾 Save Layout Here",
                       command=lambda: self._save_layout(slot, button))
         m.add_separator()
-        m.add_command(label="âœŽ Renameâ€¦",
+        m.add_command(label="✎ Rename…",
                       command=lambda: self._rename_layout(slot))
-        m.add_command(label="ðŸ–¼ Set Iconâ€¦",
+        m.add_command(label="🖼 Set Icon…",
                       command=lambda: self._set_layout_icon(slot))
         if meta.get('icon'):
-            m.add_command(label="ðŸ–¼ Clear Icon",
+            m.add_command(label="🖼 Clear Icon",
                           command=lambda: self._set_layout_meta(slot, icon=''))
         if meta.get('label'):
-            m.add_command(label="â†º Reset Name",
+            m.add_command(label="↺ Reset Name",
                           command=lambda: self._set_layout_meta(slot, label=''))
         m.add_separator()
-        m.add_command(label="âœ• Clear Saved Windows",
+        m.add_command(label="✕ Clear Saved Windows",
                       state=tk.NORMAL if has_layout else tk.DISABLED,
                       command=lambda: self._clear_layout(slot))
         m.tk_popup(event.x_root, event.y_root)
@@ -2199,10 +2472,10 @@ class WindowDock(_DOCK_BASE):
 
     def _render_categories(self, parent):
         """Render compact category buttons matching the M1/M2 size.
-        Each category has: icon_path (optional image file â€” wins over text),
+        Each category has: icon_path (optional image file — wins over text),
         display_mode ('icon' or 'text', default 'icon'), color (theme key for
         bg), font_color (optional theme key for fg).
-        Click â†’ popup. Right-click â†’ context menu (rename / display /
+        Click → popup. Right-click → context menu (rename / display /
         colors / remove). Add Category lives in the bunny menu."""
         self._category_buttons = {}
         is_horizontal = not self.vertical
@@ -2222,14 +2495,14 @@ class WindowDock(_DOCK_BASE):
             else:
                 label_text = (category.get('icon') or cat_name[:max_chars] or '?')[:max_chars]
 
-            # Category buttons always wear their color â€” popup-open state
+            # Category buttons always wear their color — popup-open state
             # is shown via a darker shade rather than a gray inactive state.
             active_bg = color
             active_fg = font_color if font_color else THEME['bg']
             inactive_bg = color
             inactive_fg = font_color if font_color else THEME['bg']
 
-            # Compact button â€” narrow enough to keep the dock slim while
+            # Compact button — narrow enough to keep the dock slim while
             # still showing 3-4 chars of icon
             cat_w = self._dock_text_width()
             pad_x = 1 if not is_horizontal else 0
@@ -2347,21 +2620,21 @@ class WindowDock(_DOCK_BASE):
                     activebackground=THEME['pink'], activeforeground=THEME['bg'],
                     font=('Segoe UI', 9))
 
-        m.add_command(label=f"âœŽ Rename '{category['name']}'",
+        m.add_command(label=f"✎ Rename '{category['name']}'",
                       command=lambda: self._rename_category(category))
 
         cur_mode = category.get('display_mode', 'icon')
         next_mode = 'text' if cur_mode == 'icon' else 'icon'
-        m.add_command(label=f"â‡† Show {next_mode.title()}",
+        m.add_command(label=f"⇆ Show {next_mode.title()}",
                       command=lambda: self._set_category_display_mode(category, next_mode))
 
-        m.add_command(label="âœŽ Edit Icon Text",
+        m.add_command(label="✎ Edit Icon Text",
                       command=lambda: self._edit_category_icon(category))
 
-        m.add_command(label="ðŸ–¼ Set Icon Imageâ€¦",
+        m.add_command(label="🖼 Set Icon Image…",
                       command=lambda: self._set_category_icon_image(category))
         if category.get('icon_path'):
-            m.add_command(label="ðŸ–¼ Clear Icon Image",
+            m.add_command(label="🖼 Clear Icon Image",
                           command=lambda: self._set_category_icon_image(category, ''))
 
         # Category background color
@@ -2372,28 +2645,28 @@ class WindowDock(_DOCK_BASE):
         for key in self._CATEGORY_PALETTE:
             if key not in THEME:
                 continue
-            mark = "â— " if key == cur_bg else "   "
+            mark = "● " if key == cur_bg else "   "
             bg_menu.add_command(label=f"{mark}{key}",
                                 command=lambda k=key: self._set_category_color(category, k))
-        m.add_cascade(label="ðŸŽ¨ Button Color", menu=bg_menu)
+        m.add_cascade(label="🎨 Button Color", menu=bg_menu)
 
         # Font color
         fg_menu = tk.Menu(m, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                           activebackground=THEME['teal'], activeforeground=THEME['bg'],
                           font=('Segoe UI', 9))
         cur_fg = category.get('font_color', '')
-        fg_menu.add_command(label=f"{'â— ' if not cur_fg else '   '}auto (matches button)",
+        fg_menu.add_command(label=f"{'● ' if not cur_fg else '   '}auto (matches button)",
                             command=lambda: self._set_category_font_color(category, ''))
         for key in self._CATEGORY_PALETTE:
             if key not in THEME:
                 continue
-            mark = "â— " if key == cur_fg else "   "
+            mark = "● " if key == cur_fg else "   "
             fg_menu.add_command(label=f"{mark}{key}",
                                 command=lambda k=key: self._set_category_font_color(category, k))
-        m.add_cascade(label="ðŸ…° Font Color", menu=fg_menu)
+        m.add_cascade(label="🅰 Font Color", menu=fg_menu)
 
         m.add_separator()
-        m.add_command(label="âœ• Remove Category",
+        m.add_command(label="✕ Remove Category",
                       command=lambda: self._remove_category(category))
 
         m.tk_popup(event.x_root, event.y_root)
@@ -2446,7 +2719,7 @@ class WindowDock(_DOCK_BASE):
         else:
             category.pop('icon_path', None)
         self.lm.save_shortcuts()
-        # Full rebuild â€” swapping between an image and a text label changes
+        # Full rebuild — swapping between an image and a text label changes
         # the widget type, which _refresh_category_button can't do in place.
         self._create_ui()
         if self.is_pinned:
@@ -2471,7 +2744,7 @@ class WindowDock(_DOCK_BASE):
         self._refresh_category_button(category)
 
     def _refresh_category_button(self, category):
-        """In-place update of a single category header â€” avoids the full
+        """In-place update of a single category header — avoids the full
         _create_ui rebuild flicker for color/text-only changes."""
         cat_name = category['name']
         btn = getattr(self, '_category_buttons', {}).get(cat_name)
@@ -2500,7 +2773,7 @@ class WindowDock(_DOCK_BASE):
         is_active = btn._is_active
         btn.config(bg=active_bg if is_active else inactive_bg,
                    fg=active_fg if is_active else inactive_fg)
-        # An image button carries no text â€” pushing text onto it would leave
+        # An image button carries no text — pushing text onto it would leave
         # a stale label behind the image once the image is later cleared.
         if not category.get('icon_path'):
             btn.config(text=new_text)
@@ -2598,7 +2871,7 @@ class WindowDock(_DOCK_BASE):
         y = self.winfo_y() + (event.y - self._drag_data['y'])
         self.geometry(f"+{x}+{y}")
         # Persist the user's chosen position so the dock comes back here
-        # on next launch (taskbar-style â€” stays where you put it).
+        # on next launch (taskbar-style — stays where you put it).
         self.lm.settings['x'] = x
         self.lm.settings['y'] = y
         # Throttle disk writes via after_idle
@@ -2643,7 +2916,7 @@ class WindowDock(_DOCK_BASE):
             self._flash_feedback("Horizontal!" if not self.vertical else "Vertical!")
             return
 
-        # Floating â€” recompute natural size and position
+        # Floating — recompute natural size and position
         self.is_pinned = False
         self._create_ui()
         self.update_idletasks()
@@ -2679,7 +2952,7 @@ class WindowDock(_DOCK_BASE):
         if not cat_names:
             return
         for cat_name in cat_names:
-            # Only reopen if not already open (defensive â€” the snapshot was
+            # Only reopen if not already open (defensive — the snapshot was
             # taken before the destroy pass)
             if cat_name in ShortcutPopup.open_popups:
                 continue
@@ -2861,7 +3134,7 @@ class WindowDock(_DOCK_BASE):
         self.lm.save_settings(self.lm.settings)
 
     def _toggle_pinned_app(self, app):
-        """Toggle a pinned app â€” show/hide if running, launch if not"""
+        """Toggle a pinned app — show/hide if running, launch if not"""
         window_title = app.get('window_title', '')
         path = app.get('path', '')
         launch_cmd = app.get('launch_cmd', '')
@@ -2896,7 +3169,7 @@ class WindowDock(_DOCK_BASE):
                     self._flash_feedback(f"{app['name']} Shown")
                 return
 
-        # Not running â€” launch it
+        # Not running — launch it
         if path:
             try:
                 if launch_cmd:
@@ -2924,12 +3197,12 @@ class WindowDock(_DOCK_BASE):
             return
 
         icon_path = filedialog.askopenfilename(
-            title="Select icon (optional â€” cancel to skip)",
+            title="Select icon (optional — cancel to skip)",
             filetypes=[("Images", "*.png;*.ico;*.jpg"), ("All files", "*.*")]
         )
 
         window_title = simpledialog.askstring("Window Title",
-            "Window title for show/hide (optional â€” cancel to skip):",
+            "Window title for show/hide (optional — cancel to skip):",
             initialvalue=name)
 
         launch_cmd = ""
@@ -2960,7 +3233,7 @@ class WindowDock(_DOCK_BASE):
                       activebackground=THEME['pink'], activeforeground=THEME['bg'],
                       font=('Segoe UI', 9), relief=tk.FLAT, bd=0)
         for i, app in enumerate(apps):
-            menu.add_command(label=f"âœ• {app['name']}",
+            menu.add_command(label=f"✕ {app['name']}",
                            command=lambda idx=i: self._do_remove_pinned_app(idx))
         menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
 
@@ -2983,7 +3256,7 @@ class WindowDock(_DOCK_BASE):
                       activebackground=THEME['pink'], activeforeground=THEME['bg'],
                       font=('Segoe UI', 9), relief=tk.FLAT, bd=0)
         for i, app in enumerate(apps):
-            menu.add_command(label=f"âœŽ {app['name']}",
+            menu.add_command(label=f"✎ {app['name']}",
                            command=lambda idx=i: self._show_edit_pinned_dialog(idx))
         menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
 
@@ -2996,10 +3269,10 @@ class WindowDock(_DOCK_BASE):
         menu = tk.Menu(self, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                       activebackground=THEME['pink'], activeforeground=THEME['bg'],
                       font=('Segoe UI', 9), relief=tk.FLAT, bd=0)
-        menu.add_command(label=f"âœŽ Edit '{app.get('name', '?')}'",
+        menu.add_command(label=f"✎ Edit '{app.get('name', '?')}'",
                         command=lambda: self._show_edit_pinned_dialog(index))
         menu.add_separator()
-        menu.add_command(label=f"âœ• Remove '{app.get('name', '?')}'",
+        menu.add_command(label=f"✕ Remove '{app.get('name', '?')}'",
                         command=lambda: self._remove_pinned_app_at(index))
         menu.tk_popup(event.x_root, event.y_root)
 
@@ -3085,11 +3358,11 @@ class WindowDock(_DOCK_BASE):
         order_frame = tk.Frame(dlg, bg=THEME['bg'])
         order_frame.grid(row=5, column=0, columnspan=3, pady=8)
 
-        tk.Button(order_frame, text="â–² Move Up", bg=THEME['bg_light'], fg=THEME['teal'],
+        tk.Button(order_frame, text="▲ Move Up", bg=THEME['bg_light'], fg=THEME['teal'],
                  font=('Segoe UI', 9),
                  command=lambda: self._move_pinned_app(index, -1, dlg)
                  ).pack(side=tk.LEFT, padx=6)
-        tk.Button(order_frame, text="â–¼ Move Down", bg=THEME['bg_light'], fg=THEME['teal'],
+        tk.Button(order_frame, text="▼ Move Down", bg=THEME['bg_light'], fg=THEME['teal'],
                  font=('Segoe UI', 9),
                  command=lambda: self._move_pinned_app(index, 1, dlg)
                  ).pack(side=tk.LEFT, padx=6)
@@ -3222,7 +3495,7 @@ class WindowDock(_DOCK_BASE):
     _RUN_VALUE = 'HopperDock'
 
     def _startup_target(self):
-        """Path to register for autostart â€” frozen exe path or pythonw + script."""
+        """Path to register for autostart — frozen exe path or pythonw + script."""
         if getattr(sys, 'frozen', False):
             return f'"{sys.executable}"'
         return f'pythonw "{Path(__file__).resolve()}"'
@@ -3355,20 +3628,20 @@ class WindowDock(_DOCK_BASE):
                       font=('Segoe UI', 9), relief=tk.FLAT, bd=0)
 
         # Orientation toggle
-        orient_text = "â‡„ Switch to Horizontal" if self.vertical else "â‡… Switch to Vertical"
+        orient_text = "⇄ Switch to Horizontal" if self.vertical else "⇅ Switch to Vertical"
         menu.add_command(label=orient_text, command=self._toggle_orientation)
 
         menu.add_separator()
 
         # Pin/Unpin
-        pin_text = "ðŸ“Œ Unpin from Edge" if self.is_pinned else "ðŸ“Œ Pin to Edge"
+        pin_text = "📌 Unpin from Edge" if self.is_pinned else "📌 Pin to Edge"
         menu.add_command(label=pin_text, command=self._toggle_appbar)
 
         # Home
-        menu.add_command(label="ðŸ–¥ Move Dock to Other Monitor", command=self._move_dock_to_other_monitor)
+        menu.add_command(label="🖥 Move Dock to Other Monitor", command=self._move_dock_to_other_monitor)
 
         # Refresh monitors
-        menu.add_command(label="ðŸ”„ Refresh Monitors", command=self._refresh_monitors)
+        menu.add_command(label="🔄 Refresh Monitors", command=self._refresh_monitors)
 
         menu.add_separator()
 
@@ -3377,16 +3650,16 @@ class WindowDock(_DOCK_BASE):
                              activebackground=THEME['teal'], activeforeground=THEME['bg'],
                              font=('Segoe UI', 9))
         pinned_menu.add_command(label="+ Add Pinned App", command=self._add_pinned_app)
-        pinned_menu.add_command(label="âœŽ Edit Pinned App", command=self._edit_pinned_app)
+        pinned_menu.add_command(label="✎ Edit Pinned App", command=self._edit_pinned_app)
         pinned_menu.add_command(label="- Remove Pinned App", command=self._remove_pinned_app)
-        menu.add_cascade(label="ðŸ“Œ Pinned Apps", menu=pinned_menu)
+        menu.add_cascade(label="📌 Pinned Apps", menu=pinned_menu)
 
         # Categories submenu
         cats_menu = tk.Menu(menu, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                            activebackground=THEME['teal'], activeforeground=THEME['bg'],
                            font=('Segoe UI', 9))
         cats_menu.add_command(label="+ Add Category", command=self._add_category)
-        menu.add_cascade(label="ðŸ“‚ Categories", menu=cats_menu)
+        menu.add_cascade(label="📂 Categories", menu=cats_menu)
 
         menu.add_separator()
 
@@ -3396,23 +3669,23 @@ class WindowDock(_DOCK_BASE):
                             font=('Segoe UI', 9))
         active_theme = self.lm.settings.get('theme', 'dark')
         theme_menu.add_command(
-            label=f"{'â— ' if active_theme == 'dark' else '   '}ðŸ° Neon Bunny (Dark)",
+            label=f"{'● ' if active_theme == 'dark' else '   '}🐰 Neon Bunny (Dark)",
             command=lambda: self._switch_theme('dark'))
         theme_menu.add_command(
-            label=f"{'â— ' if active_theme == 'light' else '   '}ðŸŒ¸ Pastel Bunny (Light)",
+            label=f"{'● ' if active_theme == 'light' else '   '}🌸 Pastel Bunny (Light)",
             command=lambda: self._switch_theme('light'))
-        menu.add_cascade(label="ðŸŽ¨ Themes", menu=theme_menu)
+        menu.add_cascade(label="🎨 Themes", menu=theme_menu)
 
         menu.add_separator()
 
         # Start on login toggle
-        startup_text = ("âœ“ Start on Login" if self._is_startup_on_login()
+        startup_text = ("✓ Start on Login" if self._is_startup_on_login()
                         else "   Start on Login")
         menu.add_command(label=startup_text, command=self._toggle_startup_on_login)
 
         # Tooltip toggle
         tooltips_on = self.lm.settings.get('tooltips_enabled', True)
-        tooltips_text = "âœ“ Tooltips" if tooltips_on else "   Tooltips"
+        tooltips_text = "✓ Tooltips" if tooltips_on else "   Tooltips"
         menu.add_command(label=tooltips_text, command=self._toggle_tooltips)
 
         menu.add_separator()
@@ -3421,14 +3694,14 @@ class WindowDock(_DOCK_BASE):
         config_menu = tk.Menu(menu, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                              activebackground=THEME['teal'], activeforeground=THEME['bg'],
                              font=('Segoe UI', 9))
-        config_menu.add_command(label="ðŸ“¤ Exportâ€¦", command=self._export_config)
-        config_menu.add_command(label="ðŸ“¥ Importâ€¦", command=self._import_config)
-        menu.add_cascade(label="âš™ Config", menu=config_menu)
+        config_menu.add_command(label="📤 Export…", command=self._export_config)
+        config_menu.add_command(label="📥 Import…", command=self._import_config)
+        menu.add_cascade(label="⚙ Config", menu=config_menu)
 
         menu.add_separator()
 
         # Quit
-        menu.add_command(label="âœ• Quit HopperDock", command=self._close_app)
+        menu.add_command(label="✕ Quit HopperDock", command=self._close_app)
 
         # Show menu at cursor
         menu.tk_popup(event.x_root, event.y_root)
@@ -3477,7 +3750,7 @@ class WindowDock(_DOCK_BASE):
         """Position the collapsed dock to fill the same rect the AppBar has
         reserved on the desktop. The chroma-transparent background hides the
         empty parts; only the bunny + colored peek tabs render visibly."""
-        # Prefer the appbar's reserved rect â€” guarantees the visible peek
+        # Prefer the appbar's reserved rect — guarantees the visible peek
         # strip lines up exactly with the reserved desktop area
         if self.is_appbar and self.appbar_data:
             rc = self.appbar_data.rc
@@ -3557,7 +3830,7 @@ class WindowDock(_DOCK_BASE):
         if result:
             self.is_appbar = True
             logger.info("AppBar registered successfully")
-            # Re-affirm DragAcceptFiles â€” appbar registration sometimes
+            # Re-affirm DragAcceptFiles — appbar registration sometimes
             # resets DnD acceptance on the window.
             try:
                 shell32.DragAcceptFiles(hwnd, True)
@@ -3586,7 +3859,7 @@ class WindowDock(_DOCK_BASE):
             return
 
         self.update_idletasks()
-        # Use REQUESTED size from layout, not the current window size â€” the
+        # Use REQUESTED size from layout, not the current window size — the
         # latter still carries the previous orientation's dimensions when
         # called right after a `_create_ui()` rebuild (which causes the dock
         # to span the full screen on orientation switch).
@@ -3637,7 +3910,7 @@ class WindowDock(_DOCK_BASE):
             self.appbar_data.rc.right = m_right
             self.appbar_data.rc.bottom = work_bottom
             shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(self.appbar_data))
-            # QUERYPOS shoves us inward if anything else claims the edge â€”
+            # QUERYPOS shoves us inward if anything else claims the edge —
             # including a ghost registration left behind by an instance that
             # was killed without unregistering. Re-assert flush-to-edge before
             # committing, otherwise "Pin to Edge" lands short of the edge.
@@ -3650,12 +3923,12 @@ class WindowDock(_DOCK_BASE):
             self.geometry(f"{width}x{bar_h}+{m_right - width}+{self.appbar_data.rc.top}")
             # Flush the geometry request NOW. Left pending, it loses a race
             # with the shell's own post-SETPOS repositioning and the dock
-            # settles at its pre-pin spot instead â€” which is why re-pinning
+            # settles at its pre-pin spot instead — which is why re-pinning
             # after an unpin landed short of the edge and too far down.
             self.update_idletasks()
         else:
             # Pin to top edge, full monitor width.
-            # Use REQUESTED height (natural content height) â€” current winfo_height()
+            # Use REQUESTED height (natural content height) — current winfo_height()
             # may still be the tall vertical-mode size and would reserve the whole
             # screen as appbar real estate.
             natural_h = self.winfo_reqheight()
@@ -3673,7 +3946,7 @@ class WindowDock(_DOCK_BASE):
             self.appbar_data.rc.right = m_right
             self.appbar_data.rc.bottom = work_top + natural_h
             shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(self.appbar_data))
-            # Same re-assert as the vertical branch â€” see the comment there.
+            # Same re-assert as the vertical branch — see the comment there.
             self.appbar_data.rc.left = m_left
             self.appbar_data.rc.top = work_top
             self.appbar_data.rc.right = m_right
@@ -3681,7 +3954,7 @@ class WindowDock(_DOCK_BASE):
             shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(self.appbar_data))
             bar_h = self.appbar_data.rc.bottom - self.appbar_data.rc.top or natural_h
             self.geometry(f"{m_width}x{bar_h}+{m_left}+{work_top}")
-            self.update_idletasks()  # see the vertical branch â€” same race
+            self.update_idletasks()  # see the vertical branch — same race
 
     def _restore_pin_state(self, pinned, expanded):
         """Restore pinned state on startup. Dock always renders fully
@@ -3692,7 +3965,7 @@ class WindowDock(_DOCK_BASE):
         self.is_pinned = True
         self.dock_expanded = True
         # Re-pin on the monitor the dock was last on, not blindly on the
-        # primary â€” otherwise restarting yanks a second-monitor dock back to
+        # primary — otherwise restarting yanks a second-monitor dock back to
         # monitor 1.
         self.pinned_monitor = None
         saved_x = self.lm.settings.get('x')
@@ -3737,7 +4010,7 @@ class WindowDock(_DOCK_BASE):
             self.lm.save_settings(self.lm.settings)
             self._flash_feedback("Floating")
         else:
-            # Pin â€” preserve current orientation
+            # Pin — preserve current orientation
             self.is_pinned = True
             self.pinned_monitor = None
             dock_x, dock_y = self.winfo_x(), self.winfo_y()
@@ -3792,13 +4065,13 @@ class WindowDock(_DOCK_BASE):
 
 # Logo asset filenames, most-preferred first. Both live alongside this script
 # (and get bundled into _MEIPASS in a frozen build) so installs on other
-# machines stay self-contained â€” never read from C:\icons at runtime.
+# machines stay self-contained — never read from C:\icons at runtime.
 _LOGO_NAMES = (
     'hopper-dock square logo with background.png',
     'hopper-dock square logo.png',
 )
 # The in-dock bunny sits on the themed dock background, so it wants the
-# transparent cut-out â€” the "with background" plate would show as a square.
+# transparent cut-out — the "with background" plate would show as a square.
 _BUNNY_NAMES = (
     'hopper-dock square logo.png',
     'hopper-dock square logo with background.png',
@@ -3866,7 +4139,7 @@ def show_splash(duration_ms=3000):
 
     tk.Label(inner, text='HopperDock', bg=bg, fg=accent,
              font=('Segoe UI', 18, 'bold')).pack()
-    tk.Label(inner, text=f'v{__version__}  â€”  Loadingâ€¦', bg=bg, fg=text,
+    tk.Label(inner, text=f'v{__version__}  —  Loading…', bg=bg, fg=text,
              font=('Segoe UI', 10)).pack(pady=(4, 2))
     tk.Label(inner, text='courtesy of @scarylasers', bg=bg, fg=dim,
              font=('Segoe UI', 8, 'italic')).pack(pady=(2, 0))
@@ -3881,7 +4154,7 @@ def show_splash(duration_ms=3000):
 
 
 def main():
-    # Tell the taskbar this process belongs to a specific AUMID â€” must be set
+    # Tell the taskbar this process belongs to a specific AUMID — must be set
     # BEFORE any window is created. This lets pinned-shortcut indicators link
     # to the running window when its EXE matches the shortcut's AUMID.
     try:
