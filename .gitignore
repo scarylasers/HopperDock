@@ -1,6 +1,8 @@
 # PyInstaller output
 build/
 dist/
+build-staging/
+dist-staging/
 *.manifest
 
 # Python
@@ -10,7 +12,7 @@ __pycache__/
 .venv/
 venv/
 
-# Runtime logs (the real log lives in %USERPROFILE%\WindowDock\logs)
+# Runtime logs (the real log lives in %USERPROFILE%\HopperDock\logs)
 logs/
 *.log
 
@@ -20,7 +22,7 @@ logs/
 .vscode/
 
 # User config must never be committed — it holds personal paths.
-# The app writes these to %USERPROFILE%\WindowDock\, but guard against a
+# The app writes these to %USERPROFILE%\HopperDock\, but guard against a
 # stray copy landing here.
 settings.json
 shortcuts.json
