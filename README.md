@@ -154,8 +154,8 @@ If you'd rather verify than trust:
 | Skip the exe | Use Option A — it's one readable Python file |
 
 ```
-SHA-256  HopperDock.exe  v1.5.2
-716FC1D3A9539C9ACF0E8EC197197BFDC0C7E1B88EB5C74CCDF915FE82A61FF1
+SHA-256  HopperDock.exe  v1.5.3
+00EA314CDBB5FB8914F279862A10B29A8D0CBEE17BD1DE5977048F68C5C05EED
 ```
 
 **To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\WindowDock\`. If
