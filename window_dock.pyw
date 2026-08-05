@@ -3987,21 +3987,21 @@ class HopperDock(_DOCK_BASE):
 
         menu.add_separator()
 
-        # Help / about
-        help_menu = tk.Menu(menu, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
+        # About
+        about_menu = tk.Menu(menu, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
                             activebackground=THEME['teal'], activeforeground=THEME['bg'],
                             font=('Segoe UI', 9))
-        help_menu.add_command(label=f"HopperDock v{__version__}", state=tk.DISABLED)
-        help_menu.add_separator()
-        help_menu.add_command(label="⬆ Check for Updates…",
+        about_menu.add_command(label=f"HopperDock v{__version__}", state=tk.DISABLED)
+        about_menu.add_separator()
+        about_menu.add_command(label="⬆ Check for Updates…",
                               command=self._check_for_updates)
-        help_menu.add_command(label="📖 Guide",
+        about_menu.add_command(label="📖 Guide",
                               command=lambda: self._open_url(GUIDE_URL))
-        help_menu.add_command(label="☕ Support HopperDock",
+        about_menu.add_command(label="☕ Support HopperDock",
                               command=lambda: self._open_url(KOFI_URL))
-        help_menu.add_command(label="📁 Open Config Folder",
+        about_menu.add_command(label="📁 Open Config Folder",
                               command=self._open_config_folder)
-        menu.add_cascade(label="❔ Help", menu=help_menu)
+        menu.add_cascade(label="ℹ About", menu=about_menu)
 
         menu.add_separator()
 

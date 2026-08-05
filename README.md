@@ -169,10 +169,10 @@ If you'd rather verify than trust:
 SHA-256  v1.6.0
 
 HopperDock.exe
-E8EF516F59AB9E02FD8FB6D70E8C054374ADC1DC1B3CF6D46C1827770B387B43
+A2746E06A77B5D49FB38F2350EA5C26E7FBEDEDFE930640B5F5C6FE50B968D42
 
 HopperDock-1.6.0-Setup.exe
-991540402592C2A359BCF74484F0A7C9EFD085A00E40318676FCCB924296C6A2
+645161191EAB89FA4A9DF6B5E7D930C474E8C6D67C4DF8AEA2941930CD568015
 ```
 
 **To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\HopperDock\`. If
@@ -207,7 +207,7 @@ shortcuts, categories, layouts, pinned apps, theme — lives in
 `%USERPROFILE%\HopperDock\`, which no upgrade or uninstall touches. So
 upgrading is only ever about swapping the program itself.
 
-Right-click the bunny → **Help → Check for Updates…** asks GitHub what the
+Right-click the bunny → **About → Check for Updates…** asks GitHub what the
 latest release is and tells you if you're behind. Then:
 
 | Installed via | To upgrade |
@@ -419,10 +419,10 @@ Right-click the bunny:
 | **Start on Login** | add/remove the Run registry entry |
 | **Tooltips** | turn hover tooltips on or off |
 | **⚙ Config → Export / Import** | save or load everything as one JSON bundle |
-| **❔ Help → Check for Updates…** | ask GitHub whether a newer release exists |
-| **❔ Help → Guide** | open the illustrated guide |
-| **❔ Help → Support HopperDock** | Ko-fi, if you'd like to say thanks |
-| **❔ Help → Open Config Folder** | open `%USERPROFILE%\HopperDock\` in Explorer |
+| **ℹ About → Check for Updates…** | ask GitHub whether a newer release exists |
+| **ℹ About → Guide** | open the illustrated guide |
+| **ℹ About → Support HopperDock** | Ko-fi, if you'd like to say thanks |
+| **ℹ About → Open Config Folder** | open `%USERPROFILE%\HopperDock\` in Explorer |
 | **✕ Quit HopperDock** | exit |
 
 The dock also lives in your **system tray** — click the tray icon to show/hide
@@ -541,7 +541,7 @@ time and you'd like to say thanks:
 ☕ **[ko-fi.com/scarylasers_](https://ko-fi.com/scarylasers_)**
 
 Entirely optional — nothing is locked, limited or nagged about. It's also in
-the app under the bunny menu → **Help → Support HopperDock**.
+the app under the bunny menu → **About → Support HopperDock**.
 
 Free ways to help that are worth just as much: star the repo, tell someone who
 juggles windows for a living, or open an issue when something breaks.
