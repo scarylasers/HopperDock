@@ -36,13 +36,39 @@ CONFIG_DIR_NAME = "HopperDock"
 LEGACY_CONFIG_DIR_NAME = "WindowDock"  # pre-1.6, when the app had the old name
 
 
+def _repoint_config_paths(config_dir, old_dir, new_dir):
+    """Rewrite absolute paths in the config JSON that point into `old_dir`.
+
+    The folder rename moves the files but not the *references to them*: icons
+    for dropped apps are cached inside the config folder and stored as
+    absolute paths, so after the rename a pinned app silently loses its icon.
+    Rewrites the path prefix in every spelling that can appear in these files
+    — JSON-escaped backslashes, plain backslashes, and forward slashes.
+    """
+    forms = [(str(old_dir).replace('\\', s), str(new_dir).replace('\\', s))
+             for s in ('\\\\', '\\', '/')]
+    for path in config_dir.glob('*.json'):
+        try:
+            text = original = path.read_text(encoding='utf-8-sig')
+            for stale, fresh in forms:
+                text = re.sub(re.escape(stale), fresh.replace('\\', '\\\\'),
+                              text, flags=re.IGNORECASE)
+            if text != original:
+                path.write_text(text, encoding='utf-8')
+        except Exception:
+            # A single unreadable/locked file must not abort the migration —
+            # the folder move itself has already succeeded by this point.
+            pass
+
+
 def _resolve_config_dir():
     """`~/HopperDock`, migrating a pre-1.6 `~/WindowDock` folder into it once.
 
-    A plain rename keeps every path inside (icon cache, examples) valid. If
-    the rename can't happen — both folders exist, or another instance still
-    holds the log file open — keep using the legacy folder rather than
-    silently stranding the user's shortcuts in a directory nothing reads.
+    A plain rename keeps the folder's contents intact; `_repoint_config_paths`
+    then fixes the stored references that still name the old folder. If the
+    rename can't happen — both folders exist, or another instance still holds
+    the log file open — keep using the legacy folder rather than silently
+    stranding the user's shortcuts in a directory nothing reads.
     """
     new = Path.home() / CONFIG_DIR_NAME
     old = Path.home() / LEGACY_CONFIG_DIR_NAME
@@ -50,9 +76,10 @@ def _resolve_config_dir():
         return new
     try:
         old.rename(new)
-        return new
     except Exception:
         return old
+    _repoint_config_paths(new, old, new)
+    return new
 
 
 CONFIG_DIR = _resolve_config_dir()
