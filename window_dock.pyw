@@ -27,7 +27,7 @@ except Exception as _dnd_err:
     DND_FILES = '*'
     _DND_AVAILABLE = False
 
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 
 # Setup logging
 LOG_DIR = Path.home() / "WindowDock" / "logs"
@@ -82,6 +82,89 @@ SWP_NOZORDER = 0x0004
 SWP_SHOWWINDOW = 0x0040
 SWP_FRAMECHANGED = 0x0020
 WPF_RESTORETOMAXIMIZED = 0x0002
+GW_OWNER = 4
+
+
+# Separators apps use between document and app name: "Friends - Discord",
+# "#general | Server - Discord".
+_TITLE_SEPARATORS = (' - ', ' — ', ' – ', ' | ', ' • ')
+
+
+def _title_segments(title):
+    """Split a window caption into its separator-delimited parts."""
+    parts = [title]
+    for sep in _TITLE_SEPARATORS:
+        parts = [chunk for part in parts for chunk in part.split(sep)]
+    return [p.strip().lower() for p in parts if p.strip()]
+
+
+def _find_app_window(title):
+    """HWND for the window named `title`, else 0.
+
+    Exact match first, then by caption segment. Apps that retitle themselves
+    per view never satisfy FindWindowW's exact compare — Discord is "Friends
+    - Discord", then "#channel | Server - Discord" — so a pin configured with
+    "Discord" would relaunch forever instead of toggling.
+
+    Matching is per segment, not substring: a plain `in` test also matches
+    unrelated windows that merely mention the app ("Create homepage linking
+    to Discord community"). A trailing segment outranks any other because
+    "<document> - <app>" is the Windows convention, which keeps a browser tab
+    about Discord from outranking Discord itself.
+
+    Hidden windows count — hiding one is how the toggle works, so it has to
+    stay findable to be unhidden — but visible ones are preferred.
+    """
+    hwnd = user32.FindWindowW(None, title)
+    if hwnd:
+        return hwnd
+
+    needle = title.strip().lower()
+    # [trailing-visible, trailing-hidden, any-visible, any-hidden]
+    tiers = ([], [], [], [])
+
+    def callback(hwnd, _lparam):
+        ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if ex_style & WS_EX_TOOLWINDOW or user32.GetWindow(hwnd, GW_OWNER):
+            return True  # owned popups and tool windows aren't the main window
+        length = user32.GetWindowTextLengthW(hwnd)
+        if not length:
+            return True
+        buff = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buff, length + 1)
+        segments = _title_segments(buff.value)
+        if needle not in segments:
+            return True
+        tier = 0 if segments[-1] == needle else 2
+        if not user32.IsWindowVisible(hwnd):
+            tier += 1
+        tiers[tier].append(hwnd)
+        return True
+
+    proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND,
+                              ctypes.wintypes.LPARAM)(callback)
+    user32.EnumWindows(proc, 0)
+    for tier in tiers:
+        if tier:
+            return tier[0]
+    return 0
+
+
+def _launch_argv(path, launch_cmd=''):
+    """argv to launch `path`, or None to hand it to ShellExecute.
+
+    Scripts get an explicit interpreter rather than relying on the file
+    association: a missing or hijacked .py/.pyw handler turns an otherwise
+    fine click into Windows' "How do you want to open this file?" picker.
+    """
+    if launch_cmd:
+        return [launch_cmd, path]
+    low = path.lower()
+    if low.endswith(('.py', '.pyw')):
+        return ['pythonw', path]
+    if low.endswith('.ps1'):
+        return ['powershell', '-ExecutionPolicy', 'Bypass', '-File', path]
+    return None
 
 
 class SHFILEINFOW(ctypes.Structure):
@@ -1078,7 +1161,7 @@ class ShortcutPopup(tk.Toplevel):
         path = shortcut.get('path', '')
         if path:
             try:
-                if path.endswith('.py'):
+                if path.endswith(('.py', '.pyw')):
                     subprocess.Popen(['pythonw', path], shell=True)
                 elif path.endswith('.ps1'):
                     subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-File', path], shell=True)
@@ -1202,7 +1285,6 @@ class WindowDock(_DOCK_BASE):
 
     def _setup_window(self):
         self.title("HopperDock")
-        self._apply_window_icon()
         self.overrideredirect(True)
         self.attributes('-topmost', True)
         # Note: WS_EX_LAYERED (set by `-alpha < 1`) breaks OLE drag-drop
@@ -1210,6 +1292,11 @@ class WindowDock(_DOCK_BASE):
         self.attributes('-alpha', 1.0)
         # No border - sleek flush edge look
         self.configure(bg=THEME['bg'], highlightthickness=0)
+        # Icon goes on LAST: `overrideredirect` makes Tk tear down and rebuild
+        # the Win32 window, and the rebuilt one comes back with Tk's own
+        # feather class icon and no WM_SETICON — so anything set earlier is
+        # thrown away and the taskbar draws the feather.
+        self._apply_window_icon()
 
     def _apply_window_icon(self):
         """Set the taskbar / alt-tab icon from the bundled .ico."""
@@ -1221,6 +1308,53 @@ class WindowDock(_DOCK_BASE):
             self.iconbitmap(default=str(ico))
         except Exception as e:
             logger.warning(f"Window icon load failed: {e}")
+        # `iconbitmap` alone doesn't stick on an overrideredirect window, so
+        # push the icon onto the HWND ourselves once the window exists.
+        self.after(0, lambda: self._set_win32_icon(ico))
+
+    def _set_win32_icon(self, ico):
+        """Push `ico` onto our real top-level HWND via WM_SETICON."""
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        LR_DEFAULTSIZE = 0x0040
+        WM_SETICON = 0x0080
+        ICON_SMALL, ICON_BIG = 0, 1
+        SM_CXICON, SM_CXSMICON = 11, 49
+        try:
+            # A private user32 handle — setting argtypes on the shared
+            # `ctypes.windll.user32` would rewrite the prototypes every other
+            # call site in this file relies on.
+            u32 = ctypes.WinDLL('user32')
+            u32.LoadImageW.restype = ctypes.c_void_p
+            u32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                         ctypes.c_void_p, ctypes.c_void_p]
+
+            # Tk's toplevel sits inside a wrapper window; the taskbar tracks
+            # the outermost one.
+            hwnd = self.winfo_id()
+            parent = u32.GetParent(hwnd)
+            while parent:
+                hwnd = parent
+                parent = u32.GetParent(hwnd)
+
+            # Keep the handles alive for the life of the process — Windows
+            # frees LoadImage icons when the process exits.
+            self._win32_icon_handles = getattr(self, '_win32_icon_handles', [])
+            for which, metric in ((ICON_BIG, SM_CXICON),
+                                  (ICON_SMALL, SM_CXSMICON)):
+                px = u32.GetSystemMetrics(metric)
+                handle = u32.LoadImageW(None, str(ico), IMAGE_ICON, px, px,
+                                        LR_LOADFROMFILE)
+                if not handle:
+                    handle = u32.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0,
+                                            LR_LOADFROMFILE | LR_DEFAULTSIZE)
+                if not handle:
+                    continue
+                self._win32_icon_handles.append(handle)
+                u32.SendMessageW(hwnd, WM_SETICON, which, handle)
+            logger.info(f"Window icon set on hwnd {hwnd} from {ico.name}")
+        except Exception as e:
+            logger.warning(f"WM_SETICON failed: {e}")
 
     def _setup_drag_drop(self):
         """Enable drag-drop. Uses tkinterdnd2 (OLE-based) when available
@@ -2272,7 +2406,7 @@ class WindowDock(_DOCK_BASE):
         path = shortcut.get('path', '')
         if path:
             try:
-                if path.endswith('.py'):
+                if path.endswith(('.py', '.pyw')):
                     subprocess.Popen(['pythonw', path], shell=True)
                 elif path.endswith('.ps1'):
                     subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-File', path], shell=True)
@@ -3141,7 +3275,7 @@ class WindowDock(_DOCK_BASE):
 
         # Try to find existing window by title
         if window_title:
-            hwnd = user32.FindWindowW(None, window_title)
+            hwnd = _find_app_window(window_title)
             if hwnd:
                 SW_HIDE = 0
                 SW_SHOW = 5
@@ -3172,8 +3306,9 @@ class WindowDock(_DOCK_BASE):
         # Not running — launch it
         if path:
             try:
-                if launch_cmd:
-                    subprocess.Popen([launch_cmd, path],
+                argv = _launch_argv(path, launch_cmd)
+                if argv:
+                    subprocess.Popen(argv,
                                     creationflags=subprocess.DETACHED_PROCESS)
                 else:
                     os.startfile(path)
