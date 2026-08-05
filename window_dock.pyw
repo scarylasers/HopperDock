@@ -27,10 +27,65 @@ except Exception as _dnd_err:
     DND_FILES = '*'
     _DND_AVAILABLE = False
 
-__version__ = "1.5.3"
+__version__ = "1.6.0"
+
+# Where the user's settings, shortcuts, icon cache, logs and starter scripts
+# live — never next to the app, so replacing the .exe to upgrade can't take
+# the config with it.
+CONFIG_DIR_NAME = "HopperDock"
+LEGACY_CONFIG_DIR_NAME = "WindowDock"  # pre-1.6, when the app had the old name
+
+
+def _repoint_config_paths(config_dir, old_dir, new_dir):
+    """Rewrite absolute paths in the config JSON that point into `old_dir`.
+
+    The folder rename moves the files but not the *references to them*: icons
+    for dropped apps are cached inside the config folder and stored as
+    absolute paths, so after the rename a pinned app silently loses its icon.
+    Rewrites the path prefix in every spelling that can appear in these files
+    — JSON-escaped backslashes, plain backslashes, and forward slashes.
+    """
+    forms = [(str(old_dir).replace('\\', s), str(new_dir).replace('\\', s))
+             for s in ('\\\\', '\\', '/')]
+    for path in config_dir.glob('*.json'):
+        try:
+            text = original = path.read_text(encoding='utf-8-sig')
+            for stale, fresh in forms:
+                text = re.sub(re.escape(stale), fresh.replace('\\', '\\\\'),
+                              text, flags=re.IGNORECASE)
+            if text != original:
+                path.write_text(text, encoding='utf-8')
+        except Exception:
+            # A single unreadable/locked file must not abort the migration —
+            # the folder move itself has already succeeded by this point.
+            pass
+
+
+def _resolve_config_dir():
+    """`~/HopperDock`, migrating a pre-1.6 `~/WindowDock` folder into it once.
+
+    A plain rename keeps the folder's contents intact; `_repoint_config_paths`
+    then fixes the stored references that still name the old folder. If the
+    rename can't happen — both folders exist, or another instance still holds
+    the log file open — keep using the legacy folder rather than silently
+    stranding the user's shortcuts in a directory nothing reads.
+    """
+    new = Path.home() / CONFIG_DIR_NAME
+    old = Path.home() / LEGACY_CONFIG_DIR_NAME
+    if new.is_dir() or not old.is_dir():
+        return new
+    try:
+        old.rename(new)
+    except Exception:
+        return old
+    _repoint_config_paths(new, old, new)
+    return new
+
+
+CONFIG_DIR = _resolve_config_dir()
 
 # Setup logging
-LOG_DIR = Path.home() / "WindowDock" / "logs"
+LOG_DIR = CONFIG_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / f"window_dock.log"
 
@@ -150,6 +205,10 @@ def _find_app_window(title):
     return 0
 
 
+# Scripts that talk to a terminal need a terminal to talk to. See _spawn.
+CONSOLE_SUFFIXES = ('.bat', '.cmd', '.ps1')
+
+
 def _launch_argv(path, launch_cmd=''):
     """argv to launch `path`, or None to hand it to ShellExecute.
 
@@ -164,7 +223,100 @@ def _launch_argv(path, launch_cmd=''):
         return ['pythonw', path]
     if low.endswith('.ps1'):
         return ['powershell', '-ExecutionPolicy', 'Bypass', '-File', path]
+    if low.endswith(('.bat', '.cmd')):
+        return ['cmd', '/c', path]
     return None
+
+
+REPO_URL = "https://github.com/scarylasers/HopperDock"
+RELEASES_URL = f"{REPO_URL}/releases/latest"
+RELEASE_API_URL = "https://api.github.com/repos/scarylasers/HopperDock/releases/latest"
+GUIDE_URL = "https://scarylasers.github.io/HopperDock/"
+KOFI_URL = "https://ko-fi.com/scarylasers_"
+
+
+def _version_tuple(v):
+    """"1.6.0" -> (1, 6, 0), for comparing releases. Unparseable parts sort
+    lowest so a malformed tag can never masquerade as an upgrade."""
+    parts = []
+    for chunk in str(v or '').strip().lstrip('vV').split('.'):
+        digits = re.match(r'\d+', chunk)
+        parts.append(int(digits.group()) if digits else 0)
+    return tuple(parts + [0] * (3 - len(parts)))[:3]
+
+
+MIN_TILEABLE = 200  # px; below this a trimmed axis isn't worth tiling into
+
+
+def _carve_dock_out(work, dock):
+    """`work` rect minus the strip the dock occupies. Both are (l, t, r, b).
+
+    A monitor's work area already excludes the taskbar, and excludes a
+    *registered* appbar too — but the dock is only an appbar when Windows
+    accepted ABM_NEW, and never while it's floating. Without this, tiled
+    windows slide underneath the dock and whatever landed behind it looks
+    like it was never tiled at all.
+    """
+    left, top, right, bottom = work
+    d_left, d_top, d_right, d_bottom = dock
+
+    # No overlap → nothing to carve. This is the case when the dock *is* a
+    # registered appbar: the work area already stops at its edge, and trimming
+    # again would cost a second dock's width for no reason.
+    if d_right <= left or d_left >= right or d_bottom <= top or d_top >= bottom:
+        return work
+
+    # Bite the edge the dock hugs — the side it sits closest to. Choosing the
+    # nearest edge keeps this right for a dock pinned left, or dragged to the
+    # bottom, without a separate case for each.
+    gaps = {'left': d_right - left, 'right': right - d_left,
+            'top': d_bottom - top, 'bottom': bottom - d_top}
+    edge = min(gaps, key=gaps.get)
+    if edge == 'left':
+        left = max(left, d_right)
+    elif edge == 'right':
+        right = min(right, d_left)
+    elif edge == 'top':
+        top = max(top, d_bottom)
+    else:
+        bottom = min(bottom, d_top)
+
+    # A dock covering most of the screen would leave nothing to tile into.
+    # Better to tile under it than to hand out zero-width tiles.
+    if right - left < MIN_TILEABLE or bottom - top < MIN_TILEABLE:
+        return work
+    return left, top, right, bottom
+
+
+def _spawn(path, launch_cmd=''):
+    """Launch `path` the way double-clicking it in Explorer would.
+
+    Never pass shell=True here. CPython's Windows implementation sets
+    STARTF_USESHOWWINDOW/SW_HIDE for shell=True, so a .bat launched that way
+    runs completely invisibly — and one that ends in `pause` then sits there
+    forever as an orphaned hidden cmd.exe. HopperDock is a windowed app with
+    no console of its own to lend the child either, so console scripts have to
+    be given one explicitly with CREATE_NEW_CONSOLE.
+
+    Everything else is detached, so closing the dock never kills what it
+    launched. cwd is the script's own folder, matching Explorer, so relative
+    paths inside a user's script resolve the way they expect.
+    """
+    argv = _launch_argv(path, launch_cmd)
+    if argv is None:
+        os.startfile(path)
+        return
+    cwd = None
+    try:
+        parent = Path(path).parent
+        if parent.is_dir():
+            cwd = str(parent)
+    except Exception:
+        pass
+    console = path.lower().endswith(CONSOLE_SUFFIXES)
+    flags = (subprocess.CREATE_NEW_CONSOLE if console
+             else subprocess.DETACHED_PROCESS)
+    subprocess.Popen(argv, creationflags=flags, cwd=cwd, close_fds=True)
 
 
 class SHFILEINFOW(ctypes.Structure):
@@ -409,7 +561,7 @@ def _examples_dir():
     if not getattr(sys, 'frozen', False) and local.is_dir():
         return local
 
-    target = Path.home() / "WindowDock" / "examples"
+    target = CONFIG_DIR / "examples"
     bundled = Path(getattr(sys, '_MEIPASS', _app_dir())) / 'examples'
     try:
         target.mkdir(parents=True, exist_ok=True)
@@ -728,7 +880,7 @@ class LayoutManager:
     """Manages saving and restoring window layouts and shortcuts"""
 
     def __init__(self):
-        self.config_dir = Path.home() / "WindowDock"
+        self.config_dir = CONFIG_DIR
         self.config_dir.mkdir(exist_ok=True)
         self.layouts_file = self.config_dir / "layouts.json"
         self.settings_file = self.config_dir / "settings.json"
@@ -737,7 +889,10 @@ class LayoutManager:
         self.settings = self._load_settings()
         self.categories = self._load_shortcuts()
 
-    DEFAULT_SETTINGS = {'vertical': False, 'x': None, 'y': None}
+    # Vertical is the default orientation: a right-edge strip costs the least
+    # useful screen space (windows are wider than they are tall) and leaves
+    # room for the category labels to be readable.
+    DEFAULT_SETTINGS = {'vertical': True, 'x': None, 'y': None}
 
     @staticmethod
     def _load_json(path, fallback, label):
@@ -1161,17 +1316,11 @@ class ShortcutPopup(tk.Toplevel):
         path = shortcut.get('path', '')
         if path:
             try:
-                if path.endswith(('.py', '.pyw')):
-                    subprocess.Popen(['pythonw', path], shell=True)
-                elif path.endswith('.ps1'):
-                    subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-File', path], shell=True)
-                elif path.endswith('.bat') or path.endswith('.cmd'):
-                    subprocess.Popen([path], shell=True)
-                else:
-                    os.startfile(path)
+                _spawn(path, shortcut.get('launch_cmd', ''))
                 self.parent._flash_feedback("Launched!")
             except Exception as e:
-                self.parent._flash_feedback(f"Error!")
+                logger.error(f"Failed to launch {path}: {e}")
+                self.parent._flash_feedback("Error!")
 
     def _add_shortcut(self):
         file_path = filedialog.askopenfilename(
@@ -1197,12 +1346,12 @@ class ShortcutPopup(tk.Toplevel):
 _DOCK_BASE = TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk
 
 
-class WindowDock(_DOCK_BASE):
+class HopperDock(_DOCK_BASE):
     """Main floating dock application - Cute Bunny Theme"""
 
     def __init__(self):
         super().__init__()
-        logger.info("Initializing WindowDock UI...")
+        logger.info("Initializing HopperDock UI...")
 
         self.wm = WindowManager()
         self.lm = LayoutManager()
@@ -1212,7 +1361,7 @@ class WindowDock(_DOCK_BASE):
         # Apply saved theme before any UI is built
         set_theme(self.lm.settings.get('theme', 'dark'))
 
-        self.vertical = self.lm.settings.get('vertical', False)
+        self.vertical = self.lm.settings.get('vertical', True)
         self.is_appbar = False
         self.is_pinned = False
         self.dock_expanded = True
@@ -1577,7 +1726,7 @@ class WindowDock(_DOCK_BASE):
     def _cache_icon(img, source_path):
         """Save an extracted icon under the user's config folder and return
         its path, so shortcuts.json references a stable file."""
-        cache = Path.home() / "WindowDock" / "icons"
+        cache = CONFIG_DIR / "icons"
         cache.mkdir(parents=True, exist_ok=True)
         safe = re.sub(r'[^A-Za-z0-9_.-]', '_', Path(source_path).stem)[:48] or 'icon'
         dest = cache / f"{safe}.png"
@@ -2033,11 +2182,12 @@ class WindowDock(_DOCK_BASE):
         sep2.pack(fill=tk.X, padx=1, pady=3)
 
         # Tile button
-        tile_btn = self._create_button(main_frame, "T", THEME['purple'],
-                                       THEME['pink'], width=3,
+        tile_btn = self._create_button(main_frame, "TILE", THEME['purple'],
+                                       THEME['pink'],
+                                       width=self._dock_text_width(),
                                        command=self._show_tile_menu)
         tile_btn.pack(pady=1)
-        self._add_tooltip(tile_btn, "Tile windows")
+        self._add_tooltip(tile_btn, "Tile windows in a grid")
 
         sep_cat = tk.Frame(main_frame, bg=THEME['pink'], height=1)
         sep_cat.pack(fill=tk.X, padx=1, pady=3)
@@ -2406,16 +2556,10 @@ class WindowDock(_DOCK_BASE):
         path = shortcut.get('path', '')
         if path:
             try:
-                if path.endswith(('.py', '.pyw')):
-                    subprocess.Popen(['pythonw', path], shell=True)
-                elif path.endswith('.ps1'):
-                    subprocess.Popen(['powershell', '-ExecutionPolicy', 'Bypass', '-File', path], shell=True)
-                elif path.endswith('.bat') or path.endswith('.cmd'):
-                    subprocess.Popen([path], shell=True)
-                else:
-                    os.startfile(path)
+                _spawn(path, shortcut.get('launch_cmd', ''))
                 self._flash_feedback("Launched!")
             except Exception as e:
+                logger.error(f"Failed to launch {path}: {e}")
                 self._flash_feedback("Error!")
 
     def _update_category_button_state(self, cat_name):
@@ -2699,8 +2843,7 @@ class WindowDock(_DOCK_BASE):
         if not path:
             return
         try:
-            import os as _os
-            _os.startfile(path)
+            _spawn(path, shortcut.get('launch_cmd', ''))
             self._flash_feedback("Launched")
         except Exception as e:
             logger.error(f"Failed to launch {path}: {e}")
@@ -3194,17 +3337,31 @@ class WindowDock(_DOCK_BASE):
 
         menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
 
+    def _tileable_rect(self, monitor):
+        """The area tiles may occupy on `monitor` — see `_carve_dock_out`."""
+        work = (monitor.get('work_left', monitor['left']),
+                monitor.get('work_top', monitor['top']),
+                monitor.get('work_right', monitor['right']),
+                monitor.get('work_bottom', monitor['bottom']))
+        try:
+            d_x, d_y = self.winfo_rootx(), self.winfo_rooty()
+            dock = (d_x, d_y, d_x + self.winfo_width(), d_y + self.winfo_height())
+        except Exception:
+            return work
+        return _carve_dock_out(work, dock)
+
     def _tile_windows(self, monitor, cols, rows):
         windows = WindowManager.get_visible_windows()
         if not windows:
             return
-        tile_w = monitor['width'] // cols
-        tile_h = monitor['height'] // rows
+        left, top, right, bottom = self._tileable_rect(monitor)
+        tile_w = (right - left) // cols
+        tile_h = (bottom - top) // rows
         for i, win in enumerate(windows[:cols * rows]):
             col = i % cols
             row = i // cols
-            x = monitor['left'] + col * tile_w
-            y = monitor['top'] + row * tile_h
+            x = left + col * tile_w
+            y = top + row * tile_h
             WindowManager.move_window(win['hwnd'], x, y, tile_w, tile_h, restore_max=False)
         self._flash_feedback(f"Tiled {min(len(windows), cols*rows)}")
 
@@ -3306,12 +3463,7 @@ class WindowDock(_DOCK_BASE):
         # Not running — launch it
         if path:
             try:
-                argv = _launch_argv(path, launch_cmd)
-                if argv:
-                    subprocess.Popen(argv,
-                                    creationflags=subprocess.DETACHED_PROCESS)
-                else:
-                    os.startfile(path)
+                _spawn(path, launch_cmd)
                 self._flash_feedback(f"{app['name']} Launched")
             except Exception as e:
                 logger.error(f"Failed to launch {app['name']}: {e}")
@@ -3835,11 +3987,97 @@ class WindowDock(_DOCK_BASE):
 
         menu.add_separator()
 
+        # About
+        about_menu = tk.Menu(menu, tearoff=0, bg=THEME['bg'], fg=THEME['text'],
+                            activebackground=THEME['teal'], activeforeground=THEME['bg'],
+                            font=('Segoe UI', 9))
+        about_menu.add_command(label=f"HopperDock v{__version__}", state=tk.DISABLED)
+        about_menu.add_separator()
+        about_menu.add_command(label="⬆ Check for Updates…",
+                              command=self._check_for_updates)
+        about_menu.add_command(label="📖 Guide",
+                              command=lambda: self._open_url(GUIDE_URL))
+        about_menu.add_command(label="☕ Support HopperDock",
+                              command=lambda: self._open_url(KOFI_URL))
+        about_menu.add_command(label="📁 Open Config Folder",
+                              command=self._open_config_folder)
+        menu.add_cascade(label="ℹ About", menu=about_menu)
+
+        menu.add_separator()
+
         # Quit
         menu.add_command(label="✕ Quit HopperDock", command=self._close_app)
 
         # Show menu at cursor
         menu.tk_popup(event.x_root, event.y_root)
+
+    # ---- help / updates --------------------------------------------------
+    def _open_url(self, url):
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception as e:
+            logger.error(f"Could not open {url}: {e}")
+            self._flash_feedback("Error!")
+
+    def _open_config_folder(self):
+        try:
+            os.startfile(str(CONFIG_DIR))
+        except Exception as e:
+            logger.error(f"Could not open config folder: {e}")
+            self._flash_feedback("Error!")
+
+    def _check_for_updates(self):
+        """Ask GitHub for the latest release and offer to open it.
+
+        The download is deliberately *not* automated: a running .exe can't
+        overwrite itself on Windows, so self-updating means shipping a second
+        helper process to do the swap after exit — more moving parts than a
+        35 MB single file is worth. Config lives outside the app, so upgrading
+        really is just replacing the file.
+        """
+        self._flash_feedback("Checking…")
+        import threading
+
+        def work():
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    RELEASE_API_URL,
+                    headers={'Accept': 'application/vnd.github+json',
+                             'User-Agent': f'HopperDock/{__version__}'})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.load(resp)
+                latest = str(data.get('tag_name', '')).lstrip('vV')
+                url = data.get('html_url') or RELEASES_URL
+            except Exception as e:
+                logger.warning(f"Update check failed: {e}")
+                self.after(0, lambda: self._update_check_done(None, None, str(e)))
+                return
+            self.after(0, lambda: self._update_check_done(latest, url, None))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_check_done(self, latest, url, error):
+        if error:
+            messagebox.showwarning(
+                "Check for Updates",
+                "Couldn't reach GitHub to check for updates.\n\n"
+                f"{error}\n\nYou can always look at:\n{RELEASES_URL}")
+            return
+        if _version_tuple(latest) > _version_tuple(__version__):
+            if messagebox.askyesno(
+                    "Update Available",
+                    f"HopperDock {latest} is out — you're on {__version__}.\n\n"
+                    "Open the download page?\n\n"
+                    "Upgrading is just replacing HopperDock.exe (or re-running "
+                    "the installer). Your settings, shortcuts and layouts live "
+                    "in your config folder and are left alone."):
+                self._open_url(url)
+        else:
+            messagebox.showinfo(
+                "Up to Date",
+                f"You're on the latest version ({__version__}).")
 
     def _apply_rounded_corners(self, radius=12):
         """Apply rounded corners on left side only (right is flush with screen edge)"""
@@ -4317,13 +4555,13 @@ def main():
 
     try:
         show_splash()
-        logger.info("Initializing WindowDock application")
-        app = WindowDock()
-        logger.info("WindowDock initialized successfully, starting main loop")
+        logger.info("Initializing HopperDock application")
+        app = HopperDock()
+        logger.info("HopperDock initialized successfully, starting main loop")
         app.mainloop()
-        logger.info("WindowDock closed normally")
+        logger.info("HopperDock closed normally")
     except Exception as e:
-        logger.exception(f"Fatal error in WindowDock: {e}")
+        logger.exception(f"Fatal error in HopperDock: {e}")
         raise
 
 

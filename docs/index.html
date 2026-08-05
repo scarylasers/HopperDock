@@ -334,7 +334,7 @@ footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 
     <div class="badges">
       <span class="badge">WINDOWS 10 / 11</span>
       <span class="badge">FREE &amp; MIT LICENSED</span>
-      <span class="badge">NO INSTALLER NEEDED</span>
+      <span class="badge">INSTALLER OR PORTABLE</span>
     </div>
   </header>
 
@@ -450,7 +450,7 @@ footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 
         <button class="k k-empty"  data-k="lay">3</button>
         <button class="k k-empty"  data-k="lay">4</button>
         <hr>
-        <button class="k k-purple" data-k="tile">T</button>
+        <button class="k k-purple" data-k="tile">TILE</button>
         <hr>
         <button class="k k-pink"   data-k="cat">VR</button>
         <button class="k k-yellow" data-k="cat">MIX</button>
@@ -475,8 +475,9 @@ footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 
             <dd>Your four saved layouts. <b>Click</b> to restore one, <b>right-click</b> to save, rename or give it an icon. Filled-in means something's saved there.</dd>
           </div>
           <div class="row" data-k="tile">
-            <dt>T</dt>
-            <dd>Tile your windows into columns or a grid, on any monitor.</dd>
+            <dt>TILE</dt>
+            <dd>Tile your windows into columns or a grid, on any monitor.
+                Tiles stop at the dock rather than sliding under it.</dd>
           </div>
           <div class="row" data-k="cat">
             <dt>Categories</dt>
@@ -493,20 +494,36 @@ footer { margin-top: clamp(3.5rem, 8vw, 5.5rem); padding-top: 2rem; border-top: 
 
   <section id="install">
     <div class="sec-head"><span class="chip" style="--c: var(--purple)"></span><span class="eyebrow">Getting it</span></div>
-    <h2>Two ways in</h2>
-    <p class="lede">Pick the first one if you just want to use it. Pick the second
-      if you want to poke at the code.</p>
+    <h2>Three ways in</h2>
+    <p class="lede">Take the installer if you just want it working. Take the
+      portable file if you'd rather nothing touched your machine. Take the code
+      if you want to poke at it.</p>
 
     <div class="paths">
       <div class="path feature">
-        <h3>⬇ Just give me the app</h3>
-        <p class="who">No Python, no setup, nothing to install.</p>
+        <h3>⬇ Install it properly</h3>
+        <p class="who">Start Menu entry and a normal uninstaller. No admin needed.</p>
+        <ol class="steps">
+          <li>Download <code>HopperDock-<i>version</i>-Setup.exe</code> from the releases page.</li>
+          <li>Run it. <b>Windows will show a blue warning screen</b> — that's
+              expected. <a href="#smartscreen">Here's how to get past it</a>.</li>
+          <li>Tick <b>Start when I log in</b> if you want it always there.</li>
+          <li>The bunny appears.</li>
+        </ol>
+        <div class="note" style="margin-top:1.1rem">
+          <span class="ico">🧷</span>
+          <p>It installs for you only, into <code>%LOCALAPPDATA%\Programs\HopperDock</code>,
+             so there's no administrator prompt. Uninstalling keeps your settings.</p>
+        </div>
+      </div>
+
+      <div class="path">
+        <h3>🎒 Just give me the file</h3>
+        <p class="who">Nothing installed. One file you can delete.</p>
         <ol class="steps">
           <li>Download <code>HopperDock.exe</code> from the releases page.</li>
           <li>Put it anywhere you like — Desktop is fine.</li>
-          <li>Double-click it. <b>Windows will show a blue warning screen</b> —
-              that's expected. <a href="#smartscreen">Here's how to get past it</a>.</li>
-          <li>The bunny appears.</li>
+          <li>Double-click it. Same <a href="#smartscreen">blue warning</a> as above.</li>
           <li>Right-click the bunny → <b>Start on Login</b> so it's always there.</li>
         </ol>
       </div>
@@ -590,16 +607,70 @@ run_dock.bat</pre>
       </table>
     </div>
 
-    <p class="eyebrow" style="margin-top:1.4rem">SHA-256 — HopperDock.exe v1.5.3</p>
-    <pre class="hash">00EA314CDBB5FB8914F279862A10B29A8D0CBEE17BD1DE5977048F68C5C05EED</pre>
+    <p class="eyebrow" style="margin-top:1.4rem">SHA-256 — HopperDock.exe v1.6.0</p>
+    <pre class="hash">A2746E06A77B5D49FB38F2350EA5C26E7FBEDEDFE930640B5F5C6FE50B968D42</pre>
+
+    <p class="eyebrow" style="margin-top:1.1rem">SHA-256 — HopperDock-1.6.0-Setup.exe</p>
+    <pre class="hash">645161191EAB89FA4A9DF6B5E7D930C474E8C6D67C4DF8AEA2941930CD568015</pre>
 
     <div class="note">
       <span class="ico">🧹</span>
-      <p>Don't want it any more? Delete the <code>.exe</code>, then delete
-        <code>%USERPROFILE%\WindowDock\</code>. If you turned on <b>Start on Login</b>,
-        turn it off from the bunny menu first — that's the one thing it writes
-        outside its own folder.</p>
+      <p>Don't want it any more? If you used the installer, uninstall it from
+        <b>Settings → Apps</b>. If you used the portable file, just delete the
+        <code>.exe</code>. Either way your setup survives in
+        <code>%USERPROFILE%\HopperDock\</code> — delete that too for a clean slate.
+        If you turned on <b>Start on Login</b>, turn it off from the bunny menu
+        first — that's the one thing it writes outside its own folder.</p>
     </div>
+  </section>
+
+  <section id="upgrading">
+    <div class="sec-head"><span class="chip" style="--c: var(--teal)"></span><span class="eyebrow">Staying current</span></div>
+    <h2>Upgrading</h2>
+    <p class="lede">Everything you set up — shortcuts, categories, layouts,
+      pinned apps, theme — lives in <code>%USERPROFILE%\HopperDock\</code>, and
+      no upgrade or uninstall touches it. Upgrading only ever swaps the program.</p>
+
+    <p class="lede">Right-click the bunny → <b>About → Check for Updates…</b> asks
+      GitHub what the latest release is and tells you if you're behind. Then:</p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>If you installed via…</th><th>To upgrade</th></tr></thead>
+        <tbody>
+          <tr><td>The installer</td>
+              <td>Run the new <code>Setup.exe</code>. It offers to close a running
+                  dock, then installs over the top.</td></tr>
+          <tr><td>The portable <code>.exe</code></td>
+              <td>Quit the dock (bunny → <b>Quit</b>), then replace
+                  <code>HopperDock.exe</code> with the new one.</td></tr>
+          <tr><td>Source</td>
+              <td><code>git pull</code> and restart.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span class="ico">📦</span>
+      <p><b>Coming from v1.5.x?</b> The settings folder used to be called
+        <code>WindowDock</code>. v1.6.0 renames it to <code>HopperDock</code>
+        automatically on first run, with everything still inside. If your own
+        scripts pointed at the old path, update them.</p>
+    </div>
+  </section>
+
+  <section id="support">
+    <div class="sec-head"><span class="chip" style="--c: var(--pink)"></span><span class="eyebrow">If it helped</span></div>
+    <h2>Buy me a coffee</h2>
+    <p class="lede">HopperDock is free and MIT-licensed, made by one person.
+      Nothing is locked, limited, or nagged about — and it'll stay that way. But
+      if it saved you some time and you'd like to say thanks:</p>
+    <p style="margin-top:1.2rem">
+      <a class="btn btn-primary" href="https://ko-fi.com/scarylasers_">☕ Support on Ko-fi</a>
+    </p>
+    <p class="lede" style="margin-top:1.2rem">Free ways to help that are worth
+      just as much: star the repo, tell someone who juggles windows for a living,
+      or open an issue when something breaks.</p>
   </section>
 
   <section id="first">
@@ -699,6 +770,8 @@ run_dock.bat</pre>
           <tr><td>🎨 Themes</td><td>Neon Bunny (dark) or Pastel Bunny (light).</td></tr>
           <tr><td>Start on Login</td><td>Launches HopperDock when Windows starts.</td></tr>
           <tr><td>Tooltips</td><td>Turns the hover hints on or off.</td></tr>
+          <tr><td>About → Check for Updates…</td><td>Asks GitHub whether a newer release exists.</td></tr>
+          <tr><td>About → Guide / Support / Open Config Folder</td><td>This page, Ko-fi, and your settings folder in Explorer.</td></tr>
           <tr><td>⚙ Config → Export / Import</td><td>Saves or loads your whole setup as one file.</td></tr>
           <tr><td>✕ Quit</td><td>Closes the dock. It also lives in your system tray.</td></tr>
         </tbody>
@@ -707,7 +780,7 @@ run_dock.bat</pre>
 
     <h3 style="margin-top:2.2rem">Where your settings live</h3>
     <p class="lede">Everything is stored per-user, in
-      <code>%USERPROFILE%\WindowDock\</code> — never next to the app. Delete the
+      <code>%USERPROFILE%\HopperDock\</code> — never next to the app. Delete the
       program folder and reinstall; your setup is still there.</p>
     <div class="note">
       <span class="ico">🛟</span>
@@ -739,7 +812,7 @@ run_dock.bat</pre>
     <details>
       <summary>The dock starts, then disappears</summary>
       <p>Run <code>run_dock_visible.bat</code> to see the error, and check the log at
-        <code>%USERPROFILE%\WindowDock\logs\window_dock.log</code>.</p>
+        <code>%USERPROFILE%\HopperDock\logs\window_dock.log</code>.</p>
     </details>
     <details>
       <summary>A layout didn't bring some windows back</summary>
@@ -780,6 +853,7 @@ run_dock.bat</pre>
       <a href="https://www.instagram.com/scarylasers_">Instagram</a>
       <a href="https://www.tiktok.com/@scarylasers">TikTok</a>
       <a href="https://github.com/scarylasers/HopperDock">GitHub</a>
+      <a href="https://ko-fi.com/scarylasers_">Ko-fi</a>
     </div>
     <p class="fine">If it saves you some clicks, come say hi. 🐰</p>
   </footer>

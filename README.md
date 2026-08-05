@@ -15,7 +15,9 @@ Built for VR streamers and artists working on a small screen.
 
 📖 **[Read the illustrated guide →](https://scarylasers.github.io/HopperDock/)**
 &nbsp;•&nbsp;
-⬇️ **[Download the .exe →](https://github.com/scarylasers/HopperDock/releases/latest)**
+⬇️ **[Download →](https://github.com/scarylasers/HopperDock/releases/latest)**
+&nbsp;•&nbsp;
+☕ **[Support →](https://ko-fi.com/scarylasers_)**
 
 </div>
 
@@ -27,6 +29,7 @@ Built for VR streamers and artists working on a small screen.
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
 - [Install](#install)
+- [Upgrading](#upgrading)
 - [First run](#first-run)
 - [The dock, button by button](#the-dock-button-by-button)
 - [Saved layouts](#saved-layouts)
@@ -37,6 +40,7 @@ Built for VR streamers and artists working on a small screen.
 - [Where your settings live](#where-your-settings-live)
 - [Building a standalone .exe](#building-a-standalone-exe)
 - [Troubleshooting](#troubleshooting)
+- [Support](#support)
 
 ---
 
@@ -117,20 +121,28 @@ files onto it to create shortcuts.
 
 ## Install
 
-### Option A — run from source
+Three ways in. Pick the installer if you just want it working, the portable
+exe if you'd rather nothing touched your machine, and source if you want to
+read what you're running.
 
-```bat
-git clone <your-repo-url> HopperDock
-cd HopperDock
-pip install -r requirements.txt
-run_dock.bat
-```
+### Option A — the installer
 
-`run_dock.bat` starts the dock with no console window. If something goes wrong,
-use `run_dock_visible.bat` instead — same program, but it keeps a console open
-so you can see the error.
+Download `HopperDock-<version>-Setup.exe` from the
+[latest release](https://github.com/scarylasers/HopperDock/releases/latest)
+and run it. It installs **for you only**, into
+`%LOCALAPPDATA%\Programs\HopperDock` — so there's no administrator prompt —
+and adds a Start Menu entry, an optional desktop shortcut, an optional
+start-on-login shortcut, and a normal uninstaller in
+**Settings → Apps → Installed apps**.
 
-### Option B — the standalone .exe
+Windows will still show the SmartScreen warning described under Option B; the
+installer is unsigned for the same reason the exe is.
+
+Uninstalling leaves your settings alone — they live in
+`%USERPROFILE%\HopperDock\`, not in the install folder. Delete that folder too
+if you want a truly clean slate.
+
+### Option B — the portable .exe
 
 Download `HopperDock.exe` from the [latest release](https://github.com/scarylasers/HopperDock/releases/latest)
 and double-click it. No Python needed. Put it wherever you like; it stores its
@@ -151,22 +163,68 @@ If you'd rather verify than trust:
 |---|---|
 | Check the file is the real one | `Get-FileHash HopperDock.exe` and compare to the SHA-256 below |
 | Get it scanned | Upload to [VirusTotal](https://www.virustotal.com/gui/home/upload) — free, ~70 engines |
-| Skip the exe | Use Option A — it's one readable Python file |
+| Skip the exe | Use Option C — it's one readable Python file |
 
 ```
-SHA-256  HopperDock.exe  v1.5.3
-00EA314CDBB5FB8914F279862A10B29A8D0CBEE17BD1DE5977048F68C5C05EED
+SHA-256  v1.6.0
+
+HopperDock.exe
+A2746E06A77B5D49FB38F2350EA5C26E7FBEDEDFE930640B5F5C6FE50B968D42
+
+HopperDock-1.6.0-Setup.exe
+645161191EAB89FA4A9DF6B5E7D930C474E8C6D67C4DF8AEA2941930CD568015
 ```
 
-**To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\WindowDock\`. If
+**To uninstall:** delete the `.exe`, then delete `%USERPROFILE%\HopperDock\`. If
 you enabled **Start on Login**, turn it off from the bunny menu first — that's the
 only thing written outside its own folder.
+
+### Option C — run from source
+
+```bat
+git clone <your-repo-url> HopperDock
+cd HopperDock
+pip install -r requirements.txt
+run_dock.bat
+```
+
+`run_dock.bat` starts the dock with no console window. If something goes wrong,
+use `run_dock_visible.bat` instead — same program, but it keeps a console open
+so you can see the error.
 
 ### Start it automatically
 
 Right-click the bunny → **Start on Login**. That writes a single value to
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, and unticking it removes
 that value again. Nothing else is touched.
+
+---
+
+## Upgrading
+
+**Your settings are never part of the upgrade.** Everything you've set up —
+shortcuts, categories, layouts, pinned apps, theme — lives in
+`%USERPROFILE%\HopperDock\`, which no upgrade or uninstall touches. So
+upgrading is only ever about swapping the program itself.
+
+Right-click the bunny → **About → Check for Updates…** asks GitHub what the
+latest release is and tells you if you're behind. Then:
+
+| Installed via | To upgrade |
+|---|---|
+| The installer | Run the new `Setup.exe`. It offers to close a running dock, then installs over the top. |
+| The portable .exe | Quit the dock (bunny → **Quit**), then replace `HopperDock.exe` with the new one. |
+| Source | `git pull` and restart. |
+
+The update check doesn't download anything by itself. A running `.exe` can't
+overwrite itself on Windows, so self-updating would mean shipping a second
+helper program to do the swap after exit — more moving parts than replacing
+one file is worth.
+
+> **Upgrading from v1.5.x?** The config folder was called `WindowDock` back
+> then. v1.6.0 renames it to `HopperDock` automatically on first run, keeping
+> everything inside. If you'd been pointing your own scripts at the old path,
+> update them.
 
 ---
 
@@ -200,7 +258,7 @@ Reading top to bottom in vertical mode (left to right in horizontal mode):
 | 🐰 **Bunny** | drag to move the dock | the settings menu |
 | **M1 / M2 / …** | move *every* window to that monitor | — |
 | **1 2 3 4** | restore that saved layout | layout menu (save / rename / icon / clear) |
-| **T** (or TILE) | tiling menu — 2 columns, 3 columns, 2×2, 3×2, per monitor | — |
+| **TILE** | tiling menu — 2 columns, 3 columns, 2×2, 3×2, per monitor | — |
 | **Category buttons** | open that category's shortcut popout | category menu (rename / icon / colours / remove) |
 | **Pinned app icons** | show/hide the app, or launch it if it isn't running | edit or remove that app |
 
@@ -259,7 +317,7 @@ In edit mode each shortcut grows a **×** to delete it.
 | A folder | A whole **new category**, with every file inside it added as a shortcut |
 
 Dropped apps arrive wearing **their own icon** — it's pulled straight out of the
-program and cached in `%USERPROFILE%\WindowDock\icons\`. Microsoft Store apps
+program and cached in `%USERPROFILE%\HopperDock\icons\`. Microsoft Store apps
 work too: their launcher is a stub with no icon in it, so the packaged artwork
 is read instead.
 
@@ -361,6 +419,10 @@ Right-click the bunny:
 | **Start on Login** | add/remove the Run registry entry |
 | **Tooltips** | turn hover tooltips on or off |
 | **⚙ Config → Export / Import** | save or load everything as one JSON bundle |
+| **ℹ About → Check for Updates…** | ask GitHub whether a newer release exists |
+| **ℹ About → Guide** | open the illustrated guide |
+| **ℹ About → Support HopperDock** | Ko-fi, if you'd like to say thanks |
+| **ℹ About → Open Config Folder** | open `%USERPROFILE%\HopperDock\` in Explorer |
 | **✕ Quit HopperDock** | exit |
 
 The dock also lives in your **system tray** — click the tray icon to show/hide
@@ -378,7 +440,7 @@ machine if the same files exist there.
 Everything is per-user, in:
 
 ```
-%USERPROFILE%\WindowDock\
+%USERPROFILE%\HopperDock\
 ```
 
 | File | Contents |
@@ -397,7 +459,7 @@ so a bad byte can never silently erase your shortcuts. Writes are atomic
 (temp file + replace), so an interrupted save can't truncate a config either.
 
 To reset one section, close the dock and delete just that file.
-To reset everything, delete the whole `WindowDock` folder.
+To reset everything, delete the whole `HopperDock` folder.
 
 ---
 
@@ -416,7 +478,7 @@ works from a fresh clone on any machine.
 
 > One-file builds unpack to a temp folder that gets a **different name every
 > launch**. That's why the starter `examples` scripts are copied out to
-> `%USERPROFILE%\WindowDock\examples\` on first run — a shortcut pointing into
+> `%USERPROFILE%\HopperDock\examples\` on first run — a shortcut pointing into
 > the temp folder would break on the next start.
 
 ---
@@ -425,7 +487,7 @@ works from a fresh clone on any machine.
 
 **The dock doesn't start / vanishes immediately.**
 Run `run_dock_visible.bat` to see the error, and check
-`%USERPROFILE%\WindowDock\logs\window_dock.log`.
+`%USERPROFILE%\HopperDock\logs\window_dock.log`.
 
 **No tray icon, no bunny logo.**
 `Pillow` and/or `pystray` aren't installed: `pip install -r requirements.txt`.
@@ -453,7 +515,7 @@ Its Window Title doesn't match the real window title. Right-click the icon →
 
 **Everything reset after I edited a config file by hand.**
 It shouldn't have — look for `<name>.corrupt-<timestamp>` in
-`%USERPROFILE%\WindowDock\`, which is your original file. If you edit these by
+`%USERPROFILE%\HopperDock\`, which is your original file. If you edit these by
 hand, save as **UTF-8 without a BOM**.
 
 ---
@@ -468,6 +530,21 @@ hand, save as **UTF-8 without a BOM**.
 - `HopperHome` (`move_dock_home.pyw`) is a tiny bundled helper that yanks the
   dock back to your primary monitor — handy as a taskbar shortcut if you ever
   unplug a screen while the dock is on it.
+
+---
+
+## Support
+
+HopperDock is free, MIT-licensed, and made by one person. If it saved you some
+time and you'd like to say thanks:
+
+☕ **[ko-fi.com/scarylasers_](https://ko-fi.com/scarylasers_)**
+
+Entirely optional — nothing is locked, limited or nagged about. It's also in
+the app under the bunny menu → **About → Support HopperDock**.
+
+Free ways to help that are worth just as much: star the repo, tell someone who
+juggles windows for a living, or open an issue when something breaks.
 
 ---
 

@@ -2,13 +2,13 @@
 REM ---------------------------------------------------------------------
 REM  Example HopperDock script.
 REM
-REM  This file lives in the "examples" folder next to HopperDock itself.
-REM  Drop your own .bat / .cmd files in here (or anywhere you like) and add
-REM  them to a category:  right-click a category button -> the pencil icon
-REM  in the popout -> "+ Add Shortcut".
+REM  This file lives in the "examples" folder inside your HopperDock config
+REM  folder (%%USERPROFILE%%\HopperDock\examples). Drop your own .bat / .cmd
+REM  files in there (or anywhere you like) and add them to a category:
+REM  right-click a category button -> the pencil icon -> "+ Add Shortcut".
 REM ---------------------------------------------------------------------
 echo.
-echo   Hello from HopperDock!
+echo   Hi, I'm the terminal, and I'm not that scary ;)
 echo.
 echo   This script ran from:
 echo   %~dp0
